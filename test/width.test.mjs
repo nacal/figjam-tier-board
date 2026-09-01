@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHarness } from './harness.mjs';
 
-const DEFAULT_WIDTH = 300 + 24 * 2 + 240 * 10 + 24 * 9; // 3132
+const DEFAULT_WIDTH = 300 + 24 * 2 + 240 * 10 + 24 * 9; // 2964
 
 test('既定の幅は付箋10枚ぶん', async () => {
   const h = createHarness();
