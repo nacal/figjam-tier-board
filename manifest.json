@@ -1,0 +1,12 @@
+{
+  "name": "Tier表",
+  "id": "figjam-tier-maker",
+  "api": "1.0.0",
+  "main": "dist/code.js",
+  "ui": "ui.html",
+  "editorType": ["figjam"],
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": ["none"]
+  }
+}

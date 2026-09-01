@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1e1e1e;
+    --muted: #7a7a7a;
+    --border: #e5e5e5;
+    --hover: #f2f2f2;
+    --accent: #0d99ff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #2c2c2c;
+      --fg: #ffffff;
+      --muted: #a0a0a0;
+      --border: #444444;
+      --hover: #3a3a3a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 12px;
+    background: var(--bg);
+    color: var(--fg);
+    font: 11px/1.4 "Inter", -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+  }
+  header {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  button {
+    font: inherit;
+    color: var(--fg);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: var(--hover); }
+  button:disabled { opacity: 0.35; cursor: default; }
+  button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  button.primary:hover:not(:disabled) { background: #0b87e3; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 4px;
+    border-bottom: 1px solid var(--border);
+  }
+  .swatch {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    cursor: pointer;
+    padding: 0;
+  }
+  .name {
+    flex: 1 1 auto;
+    min-width: 0;
+    font: inherit;
+    color: var(--fg);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 4px 6px;
+  }
+  .name:hover { border-color: var(--border); }
+  .name:focus { border-color: var(--accent); outline: none; }
+  .icon {
+    flex: none;
+    width: 24px;
+    padding: 4px 0;
+    text-align: center;
+  }
+  .palette {
+    display: none;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 6px;
+    padding: 8px 4px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .palette.open { display: grid; }
+  .palette button {
+    height: 22px;
+    border-radius: 4px;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    padding: 0;
+  }
+  .palette button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .empty {
+    padding: 24px 8px;
+    text-align: center;
+    color: var(--muted);
+  }
+  footer {
+    margin-top: 12px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <header>
+    <button id="create" class="primary">盤面を作成</button>
+    <button id="add">行を追加</button>
+    <button id="reload">再読み込み</button>
+  </header>
+  <div id="list"></div>
+  <footer>付箋は FigJam の機能で作り、行にドラッグして並べてください。</footer>
+
+<script>
+  var presets = [];
+  var openPaletteId = null;
+
+  function post(message) {
+    parent.postMessage({ pluginMessage: message }, '*');
+  }
+
+  function presetHex(key) {
+    for (var i = 0; i < presets.length; i++) {
+      if (presets[i].key === key) return presets[i].hex;
+    }
+    return '#e4e4e4';
+  }
+
+  function render(rows) {
+    var list = document.getElementById('list');
+    list.innerHTML = '';
+    document.getElementById('create').disabled = rows.length > 0;
+
+    if (rows.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = 'このページにはまだ Tier 表がありません。';
+      list.appendChild(empty);
+      return;
+    }
+
+    var ul = document.createElement('ul');
+    rows.forEach(function (row, index) {
+      var li = document.createElement('li');
+
+      var swatch = document.createElement('button');
+      swatch.className = 'swatch';
+      swatch.style.background = presetHex(row.color);
+      swatch.title = '色を変更';
+      swatch.onclick = function () {
+        openPaletteId = openPaletteId === row.id ? null : row.id;
+        render(rows);
+      };
+      li.appendChild(swatch);
+
+      var name = document.createElement('input');
+      name.className = 'name';
+      name.value = row.name;
+      name.onchange = function () {
+        post({ type: 'rename-row', id: row.id, name: name.value });
+      };
+      name.onkeydown = function (event) {
+        if (event.key === 'Enter') name.blur();
+      };
+      li.appendChild(name);
+
+      li.appendChild(iconButton('↑', '上へ', index === 0, function () {
+        post({ type: 'move-row', id: row.id, direction: 'up' });
+      }));
+      li.appendChild(iconButton('↓', '下へ', index === rows.length - 1, function () {
+        post({ type: 'move-row', id: row.id, direction: 'down' });
+      }));
+      li.appendChild(iconButton('×', '行を削除（中の付箋は残ります）', false, function () {
+        post({ type: 'delete-row', id: row.id });
+      }));
+
+      ul.appendChild(li);
+
+      if (openPaletteId === row.id) {
+        var palette = document.createElement('li');
+        palette.className = 'palette open';
+        presets.forEach(function (preset) {
+          var swatchButton = document.createElement('button');
+          swatchButton.style.background = preset.hex;
+          swatchButton.title = preset.label;
+          swatchButton.setAttribute('aria-pressed', preset.key === row.color ? 'true' : 'false');
+          swatchButton.onclick = function () {
+            openPaletteId = null;
+            post({ type: 'set-color', id: row.id, color: preset.key });
+          };
+          palette.appendChild(swatchButton);
+        });
+        ul.appendChild(palette);
+      }
+    });
+    list.appendChild(ul);
+  }
+
+  function iconButton(label, title, disabled, handler) {
+    var button = document.createElement('button');
+    button.className = 'icon';
+    button.textContent = label;
+    button.title = title;
+    button.disabled = disabled;
+    button.onclick = handler;
+    return button;
+  }
+
+  document.getElementById('create').onclick = function () {
+    post({ type: 'create-board' });
+  };
+  document.getElementById('add').onclick = function () {
+    post({ type: 'add-row' });
+  };
+  document.getElementById('reload').onclick = function () {
+    openPaletteId = null;
+    post({ type: 'init' });
+  };
+
+  onmessage = function (event) {
+    var message = event.data.pluginMessage;
+    if (!message || message.type !== 'rows') return;
+    presets = message.presets;
+    render(message.rows);
+  };
+
+  post({ type: 'init' });
+</script>
+</body>
+</html>

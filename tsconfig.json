@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "es2017",
+    "lib": ["es2017"],
+    "module": "none",
+    "outDir": "dist",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "typeRoots": ["./node_modules/@figma"]
+  },
+  "include": ["src/**/*.ts"]
+}
