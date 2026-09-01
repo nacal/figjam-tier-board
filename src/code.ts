@@ -135,6 +135,26 @@ function itemsOf(row: SectionNode): SceneNode[] {
   return items;
 }
 
+// 行そのものの見た目（暗い中身の面と境界線）。整列のたびに当て直すので、
+// 色セルが無かった頃に作られた盤面も、次の整列で新しい見た目に移行する。
+function applyRowChrome(row: SectionNode): void {
+  const fills = row.fills;
+  if (typeof fills !== 'symbol' && fills.length === 1) {
+    const paint = fills[0];
+    if (
+      paint.type === 'SOLID' &&
+      Math.abs(paint.color.r - CONTENT_FILL.r) < 0.002 &&
+      Math.abs(paint.color.g - CONTENT_FILL.g) < 0.002 &&
+      Math.abs(paint.color.b - CONTENT_FILL.b) < 0.002
+    ) {
+      return;
+    }
+  }
+  row.fills = [{ type: 'SOLID', color: CONTENT_FILL }];
+  row.strokes = [{ type: 'SOLID', color: BORDER_STROKE }];
+  row.strokeWeight = 1;
+}
+
 async function ensureLabel(row: SectionNode): Promise<ShapeWithTextNode> {
   const existing = findLabel(row);
   if (existing !== null) {
@@ -181,9 +201,7 @@ async function createRow(name: string, colorKey: string, x: number, y: number): 
   row.resizeWithoutConstraints(ROW_WIDTH, ROW_HEIGHT);
   row.x = x;
   row.y = y;
-  row.fills = [{ type: 'SOLID', color: CONTENT_FILL }];
-  row.strokes = [{ type: 'SOLID', color: BORDER_STROKE }];
-  row.strokeWeight = 1;
+  applyRowChrome(row);
   figma.currentPage.appendChild(row);
   await ensureLabel(row);
   return row;
@@ -241,6 +259,7 @@ function boardWidth(rows: SectionNode[]): number {
 // 落とした位置がそのまま順位になり、落とした先の付箋と場所が入れ替わる。
 // 横幅に収まらない分は折り返し、必要なら行の高さを伸ばす。
 async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> {
+  applyRowChrome(row);
   const label = await ensureLabel(row);
   const items = itemsOf(row);
   items.sort((a, b) => a.x + a.width / 2 - (b.x + b.width / 2));
