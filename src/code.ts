@@ -115,12 +115,23 @@ function createRow(name: string, colorKey: string, x: number, y: number): Sectio
 
 // 与えられた順序で全行の y を上から詰め直す。行の高さは整列やユーザー操作で
 // 変わっているので、実際の高さを積み上げて配置する。
+//
+// 基準は「今ある行の左上」であって、新しい順序の先頭に来た行が今いる場所では
+// ない。後者を基準にすると、並べ替えのたびに盤面ごとその行の位置へ飛んでいく。
 function relayout(rows: SectionNode[]): void {
   if (rows.length === 0) {
     return;
   }
-  const anchorX = rows[0].x;
-  let cursorY = rows[0].y;
+  // 盤面の原点は「今いちばん上にある行」の左上。全行の最小 x を取ると、
+  // 誰かが1行だけ横へずらしたときに盤面ごとそちらへ引っ張られてしまう。
+  let top = rows[0];
+  for (const row of rows) {
+    if (row.y < top.y) {
+      top = row;
+    }
+  }
+  const anchorX = top.x;
+  let cursorY = top.y;
   for (const row of rows) {
     row.x = anchorX;
     row.y = cursorY;
