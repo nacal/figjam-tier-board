@@ -36,8 +36,9 @@ test('整列で行の高さが変わっても盤面の上端は動かない', as
   const rows = h.rows();
   const top = { x: rows[0].x, y: rows[0].y };
 
-  for (let i = 0; i < 9; i++) {
-    h.createSticky(`item${i}`, rows[2].x + 30 + i * 10, rows[2].y + 30);
+  // 既定幅には10枚入るので、折り返させるには11枚以上いる
+  for (let i = 0; i < 13; i++) {
+    h.createSticky(`item${i}`, rows[2].x + 324 + i * 10, rows[2].y + 30);
   }
   h.settle();
   await h.send({ type: 'arrange-now' });

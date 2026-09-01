@@ -102,6 +102,34 @@ export function createHarness() {
     return section;
   }
 
+  function createShapeWithText() {
+    return {
+      type: 'SHAPE_WITH_TEXT',
+      id: nextId(),
+      name: 'Shape',
+      shapeType: 'SQUARE',
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      locked: false,
+      parent: null,
+      fills: [],
+      pluginData: {},
+      text: { fontName: { family: 'Inter', style: 'Medium' }, characters: '', fontSize: 0 },
+      getPluginData(key) {
+        return this.pluginData[key] ?? '';
+      },
+      setPluginData(key, value) {
+        this.pluginData[key] = value;
+      },
+      resize(width, height) {
+        this.width = width;
+        this.height = height;
+      },
+    };
+  }
+
   const storage = new Map();
 
   const figma = {
@@ -130,6 +158,8 @@ export function createHarness() {
       notifications.push(text);
     },
     createSection,
+    createShapeWithText,
+    async loadFontAsync() {},
     async getNodeByIdAsync(id) {
       const walk = (nodes) => {
         for (const node of nodes) {
@@ -201,6 +231,14 @@ export function createHarness() {
     settle();
   }
 
+  function items(row) {
+    return row.children.filter((child) => child.getPluginData?.('figjamTierLabel') !== '1');
+  }
+
+  function label(row) {
+    return row.children.find((child) => child.getPluginData?.('figjamTierLabel') === '1') ?? null;
+  }
+
   function rows() {
     return page
       .findAllWithCriteria({ types: ['SECTION'] })
@@ -208,5 +246,5 @@ export function createHarness() {
       .sort((a, b) => a.y - b.y);
   }
 
-  return { figma, page, send, rows, createSticky, settle, notifications, uiMessages, absolute };
+  return { figma, page, send, rows, items, label, createSticky, settle, notifications, uiMessages, absolute };
 }
