@@ -10,6 +10,7 @@ const TIER_COLOR_KEY = 'figjamTierColor';
 const ROW_WIDTH = 1600;
 const ROW_HEIGHT = 300;
 const ROW_GAP = 40;
+const BOARD_MARGIN = 160;
 
 const DEFAULT_TIERS: Array<{ name: string; color: string }> = [
   { name: 'S', color: 'red' },
@@ -132,15 +133,35 @@ async function getRowById(id: string): Promise<SectionNode | null> {
   return node;
 }
 
+// 盤面の置き場所。既存コンテンツがあればその下に置く。ビューポート中央に置くと
+// 既存の付箋の上に行が重なり、セクションがそれを自動的に子にしてしまうため。
+function boardOrigin(totalHeight: number): { x: number; y: number } {
+  const siblings = figma.currentPage.children;
+  if (siblings.length === 0) {
+    const center = figma.viewport.center;
+    return {
+      x: Math.round(center.x - ROW_WIDTH / 2),
+      y: Math.round(center.y - totalHeight / 2),
+    };
+  }
+  let minX = Infinity;
+  let maxY = -Infinity;
+  for (const node of siblings) {
+    minX = Math.min(minX, node.x);
+    maxY = Math.max(maxY, node.y + node.height);
+  }
+  return { x: Math.round(minX), y: Math.round(maxY + BOARD_MARGIN) };
+}
+
 function createBoard(): void {
   if (getRows().length > 0) {
     figma.notify('このページには既に Tier 表があります');
     return;
   }
   const totalHeight = DEFAULT_TIERS.length * ROW_HEIGHT + (DEFAULT_TIERS.length - 1) * ROW_GAP;
-  const center = figma.viewport.center;
-  const startX = Math.round(center.x - ROW_WIDTH / 2);
-  const startY = Math.round(center.y - totalHeight / 2);
+  const origin = boardOrigin(totalHeight);
+  const startX = origin.x;
+  const startY = origin.y;
 
   const created: SectionNode[] = [];
   DEFAULT_TIERS.forEach((tier, index) => {
