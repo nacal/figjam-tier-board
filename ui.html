@@ -28,11 +28,7 @@
     color: var(--fg);
     font: 11px/1.4 "Inter", -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
   }
-  header {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
+  header { display: flex; gap: 8px; }
   button {
     font: inherit;
     color: var(--fg);
@@ -44,20 +40,45 @@
   }
   button:hover:not(:disabled) { background: var(--hover); }
   button:disabled { opacity: 0.35; cursor: default; }
-  button.primary {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
-  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.primary:hover:not(:disabled) { background: #0b87e3; }
+  .options {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 10px 0;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .options label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1 1 auto;
+    cursor: pointer;
+  }
   ul { list-style: none; margin: 0; padding: 0; }
   li {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 4px;
-    border-bottom: 1px solid var(--border);
+    gap: 4px;
+    padding: 6px 2px;
+    border-top: 2px solid transparent;
+    border-bottom: 2px solid transparent;
   }
+  li.row { border-bottom-color: var(--border); }
+  li.row.dragging { opacity: 0.4; }
+  li.row.drop-before { border-top-color: var(--accent); }
+  li.row.drop-after { border-bottom-color: var(--accent); }
+  .handle {
+    flex: none;
+    width: 16px;
+    text-align: center;
+    color: var(--muted);
+    cursor: grab;
+    user-select: none;
+  }
+  .handle:active { cursor: grabbing; }
   .swatch {
     flex: none;
     width: 20px;
@@ -79,20 +100,21 @@
   }
   .name:hover { border-color: var(--border); }
   .name:focus { border-color: var(--accent); outline: none; }
-  .icon {
+  .count {
     flex: none;
-    width: 24px;
-    padding: 4px 0;
-    text-align: center;
+    min-width: 20px;
+    text-align: right;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
   }
+  .icon { flex: none; width: 22px; padding: 4px 0; text-align: center; }
   .palette {
-    display: none;
+    display: grid;
     grid-template-columns: repeat(7, 1fr);
     gap: 6px;
-    padding: 8px 4px 10px;
+    padding: 4px 2px 10px;
     border-bottom: 1px solid var(--border);
   }
-  .palette.open { display: grid; }
   .palette button {
     height: 22px;
     border-radius: 4px;
@@ -100,15 +122,8 @@
     padding: 0;
   }
   .palette button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .empty {
-    padding: 24px 8px;
-    text-align: center;
-    color: var(--muted);
-  }
-  footer {
-    margin-top: 12px;
-    color: var(--muted);
-  }
+  .empty { padding: 24px 8px; text-align: center; color: var(--muted); }
+  footer { margin-top: 12px; color: var(--muted); }
 </style>
 </head>
 <body>
@@ -117,12 +132,23 @@
     <button id="add">行を追加</button>
     <button id="reload">再読み込み</button>
   </header>
+
+  <div class="options">
+    <label>
+      <input type="checkbox" id="auto">
+      ドラッグしたら左寄せで自動整列
+    </label>
+    <button id="arrange">今すぐ整列</button>
+  </div>
+
   <div id="list"></div>
-  <footer>付箋は FigJam の機能で作り、行にドラッグして並べてください。</footer>
+  <footer>付箋は FigJam の素の機能で作り、行にドラッグして並べてください。行の順序は ⠿ をドラッグして入れ替えられます。</footer>
 
 <script>
   var presets = [];
+  var rows = [];
   var openPaletteId = null;
+  var dragId = null;
 
   function post(message) {
     parent.postMessage({ pluginMessage: message }, '*');
@@ -135,10 +161,25 @@
     return '#e4e4e4';
   }
 
-  function render(rows) {
+  function indexOfId(id) {
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].id === id) return i;
+    }
+    return -1;
+  }
+
+  function clearDropMarks() {
+    var marked = document.querySelectorAll('.drop-before, .drop-after');
+    for (var i = 0; i < marked.length; i++) {
+      marked[i].classList.remove('drop-before', 'drop-after');
+    }
+  }
+
+  function render() {
     var list = document.getElementById('list');
     list.innerHTML = '';
     document.getElementById('create').disabled = rows.length > 0;
+    document.getElementById('arrange').disabled = rows.length === 0;
 
     if (rows.length === 0) {
       var empty = document.createElement('div');
@@ -150,59 +191,124 @@
 
     var ul = document.createElement('ul');
     rows.forEach(function (row, index) {
-      var li = document.createElement('li');
-
-      var swatch = document.createElement('button');
-      swatch.className = 'swatch';
-      swatch.style.background = presetHex(row.color);
-      swatch.title = '色を変更';
-      swatch.onclick = function () {
-        openPaletteId = openPaletteId === row.id ? null : row.id;
-        render(rows);
-      };
-      li.appendChild(swatch);
-
-      var name = document.createElement('input');
-      name.className = 'name';
-      name.value = row.name;
-      name.onchange = function () {
-        post({ type: 'rename-row', id: row.id, name: name.value });
-      };
-      name.onkeydown = function (event) {
-        if (event.key === 'Enter') name.blur();
-      };
-      li.appendChild(name);
-
-      li.appendChild(iconButton('↑', '上へ', index === 0, function () {
-        post({ type: 'move-row', id: row.id, direction: 'up' });
-      }));
-      li.appendChild(iconButton('↓', '下へ', index === rows.length - 1, function () {
-        post({ type: 'move-row', id: row.id, direction: 'down' });
-      }));
-      li.appendChild(iconButton('×', '行を削除（中の付箋は残ります）', false, function () {
-        post({ type: 'delete-row', id: row.id });
-      }));
-
-      ul.appendChild(li);
-
+      ul.appendChild(renderRow(row, index));
       if (openPaletteId === row.id) {
-        var palette = document.createElement('li');
-        palette.className = 'palette open';
-        presets.forEach(function (preset) {
-          var swatchButton = document.createElement('button');
-          swatchButton.style.background = preset.hex;
-          swatchButton.title = preset.label;
-          swatchButton.setAttribute('aria-pressed', preset.key === row.color ? 'true' : 'false');
-          swatchButton.onclick = function () {
-            openPaletteId = null;
-            post({ type: 'set-color', id: row.id, color: preset.key });
-          };
-          palette.appendChild(swatchButton);
-        });
-        ul.appendChild(palette);
+        ul.appendChild(renderPalette(row));
       }
     });
     list.appendChild(ul);
+  }
+
+  function renderRow(row, index) {
+    var li = document.createElement('li');
+    li.className = 'row';
+    li.dataset.id = row.id;
+
+    var handle = document.createElement('span');
+    handle.className = 'handle';
+    handle.textContent = '⠿';
+    handle.title = 'ドラッグして行の順序を入れ替え';
+    // ハンドルを掴んだときだけドラッグを許可する。行全体を draggable に
+    // しておくと、名前の入力欄でテキストを選べなくなる。
+    handle.onmousedown = function () { li.draggable = true; };
+    handle.onmouseup = function () { li.draggable = false; };
+    li.appendChild(handle);
+
+    li.ondragstart = function (event) {
+      dragId = row.id;
+      li.classList.add('dragging');
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', row.id);
+    };
+    li.ondragend = function () {
+      dragId = null;
+      li.draggable = false;
+      li.classList.remove('dragging');
+      clearDropMarks();
+    };
+    li.ondragover = function (event) {
+      if (dragId === null || dragId === row.id) return;
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      var box = li.getBoundingClientRect();
+      var after = event.clientY > box.top + box.height / 2;
+      clearDropMarks();
+      li.classList.add(after ? 'drop-after' : 'drop-before');
+    };
+    li.ondragleave = function () {
+      li.classList.remove('drop-before', 'drop-after');
+    };
+    li.ondrop = function (event) {
+      if (dragId === null || dragId === row.id) return;
+      event.preventDefault();
+      var box = li.getBoundingClientRect();
+      var after = event.clientY > box.top + box.height / 2;
+      var from = indexOfId(dragId);
+      if (from < 0) return;
+      var moved = rows.splice(from, 1)[0];
+      var to = indexOfId(row.id) + (after ? 1 : 0);
+      rows.splice(to, 0, moved);
+      dragId = null;
+      clearDropMarks();
+      render();
+      post({ type: 'reorder-rows', ids: rows.map(function (r) { return r.id; }) });
+    };
+
+    var swatch = document.createElement('button');
+    swatch.className = 'swatch';
+    swatch.style.background = presetHex(row.color);
+    swatch.title = '色を変更';
+    swatch.onclick = function () {
+      openPaletteId = openPaletteId === row.id ? null : row.id;
+      render();
+    };
+    li.appendChild(swatch);
+
+    var name = document.createElement('input');
+    name.className = 'name';
+    name.value = row.name;
+    name.onchange = function () {
+      post({ type: 'rename-row', id: row.id, name: name.value });
+    };
+    name.onkeydown = function (event) {
+      if (event.key === 'Enter') name.blur();
+    };
+    li.appendChild(name);
+
+    var count = document.createElement('span');
+    count.className = 'count';
+    count.textContent = row.count > 0 ? String(row.count) : '';
+    count.title = 'この行のアイテム数';
+    li.appendChild(count);
+
+    li.appendChild(iconButton('↑', '上へ', index === 0, function () {
+      post({ type: 'move-row', id: row.id, direction: 'up' });
+    }));
+    li.appendChild(iconButton('↓', '下へ', index === rows.length - 1, function () {
+      post({ type: 'move-row', id: row.id, direction: 'down' });
+    }));
+    li.appendChild(iconButton('×', '行を削除（中の付箋は残ります）', false, function () {
+      post({ type: 'delete-row', id: row.id });
+    }));
+
+    return li;
+  }
+
+  function renderPalette(row) {
+    var palette = document.createElement('li');
+    palette.className = 'palette';
+    presets.forEach(function (preset) {
+      var button = document.createElement('button');
+      button.style.background = preset.hex;
+      button.title = preset.label;
+      button.setAttribute('aria-pressed', preset.key === row.color ? 'true' : 'false');
+      button.onclick = function () {
+        openPaletteId = null;
+        post({ type: 'set-color', id: row.id, color: preset.key });
+      };
+      palette.appendChild(button);
+    });
+    return palette;
   }
 
   function iconButton(label, title, disabled, handler) {
@@ -225,12 +331,22 @@
     openPaletteId = null;
     post({ type: 'init' });
   };
+  document.getElementById('arrange').onclick = function () {
+    post({ type: 'arrange-now' });
+  };
+  document.getElementById('auto').onchange = function (event) {
+    post({ type: 'set-auto-arrange', enabled: event.target.checked });
+  };
 
   onmessage = function (event) {
     var message = event.data.pluginMessage;
     if (!message || message.type !== 'rows') return;
+    // ドラッグ中に再描画すると掴んでいる行が消えるので、終わるまで待つ。
+    if (dragId !== null) return;
     presets = message.presets;
-    render(message.rows);
+    rows = message.rows;
+    document.getElementById('auto').checked = message.autoArrange;
+    render();
   };
 
   post({ type: 'init' });
