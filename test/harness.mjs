@@ -278,6 +278,15 @@ export function createHarness() {
     }
   }
 
+  // 行を別の盤面へ入れる。セクションを別のセクションへ入れ子にするのは
+  // FigJam 側の仕事なので、その結果だけを再現する。
+  function moveRowInto(row, container, y) {
+    container.appendChild(row);
+    row.x = 0;
+    row.y = y;
+    settle();
+  }
+
   // 行の中の座標（左上からの相対）を指定して付箋を置く
   function dropIn(row, text, dx, dy) {
     const at = absolute(row);
@@ -398,6 +407,7 @@ export function createHarness() {
     label,
     createSticky,
     dropIn,
+    moveRowInto,
     settle,
     notifications,
     uiMessages,
