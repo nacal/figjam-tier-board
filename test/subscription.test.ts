@@ -1,21 +1,21 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { createHarness } from './harness.mjs';
+import { test } from 'vitest';
+import { createHarness } from './harness';
 
 const CONTENT_X = 300 + 24;
 
 test('キャンバスの変更を両方の経路で購読し、パネルに出す', async () => {
   const h = createHarness();
-  await h.send({ type: 'init' });
+  await h.send('REQUEST_STATE');
 
-  const subscriptions = h.lastUiMessage().subscriptions;
+  const subscriptions = h.state().subscriptions;
   assert.deepEqual(subscriptions, ['nodechange', 'documentchange']);
 });
 
-for (const channel of ['nodechange', 'documentchange']) {
+for (const channel of ['nodechange', 'documentchange'] as const) {
   test(`${channel} だけが届いても整列する`, async () => {
     const h = createHarness();
-    await h.send({ type: 'create-board' });
+    await h.send('CREATE_BOARD');
     await h.flush();
     const row = h.rows()[0];
 
@@ -34,7 +34,7 @@ for (const channel of ['nodechange', 'documentchange']) {
 
 test('両方から二重に届いても結果は同じ', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
   await h.flush();
   const row = h.rows()[0];
 
@@ -49,7 +49,7 @@ test('両方から二重に届いても結果は同じ', async () => {
 
 test('スタイルの変更（node を持たない）が混ざっても落ちない', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
   await h.flush();
   const row = h.rows()[0];
   h.dropIn(row, 'あ', CONTENT_X + 600, 40);
@@ -69,7 +69,7 @@ test('スタイルの変更（node を持たない）が混ざっても落ちな
 
 test('生きているノードを「消えたノード」と誤判定しない', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
   await h.flush();
   const row = h.rows()[0];
   const sticky = h.dropIn(row, 'あ', CONTENT_X + 900, 40);

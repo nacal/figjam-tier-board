@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { createHarness } from './harness.mjs';
+import { test } from 'vitest';
+import { createHarness } from './harness';
 
 const CONTENT_X = 300 + 24;
 
 test('並べ替えても盤面の位置は動かない', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
   const container = h.containers()[0];
   const before = h.absolute(container);
   const ids = h.rows().map((r) => r.id);
 
-  await h.send({ type: 'reorder-rows', ids: [ids[4], ids[0], ids[1], ids[2], ids[3]] });
+  await h.send('REORDER_ROWS', [ids[4], ids[0], ids[1], ids[2], ids[3]]);
 
   assert.deepEqual(h.absolute(container), before, '表そのものは動かない');
   assert.deepEqual(h.rows().map((r) => r.name), ['D', 'S', 'A', 'B', 'C']);
@@ -20,11 +20,11 @@ test('並べ替えても盤面の位置は動かない', async () => {
 
 test('↑↓ で入れ替えても盤面の位置は動かない', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
   const container = h.containers()[0];
   const before = h.absolute(container);
 
-  await h.send({ type: 'move-row', id: h.rows()[0].id, direction: 'down' });
+  await h.send('MOVE_ROW', h.rows()[0].id, 'down');
 
   assert.deepEqual(h.absolute(container), before);
   assert.deepEqual(h.rows().map((r) => r.name), ['A', 'S', 'B', 'C', 'D']);
@@ -32,7 +32,7 @@ test('↑↓ で入れ替えても盤面の位置は動かない', async () => {
 
 test('整列で行の高さが変わっても盤面の左上は動かない', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
   const container = h.containers()[0];
   const before = h.absolute(container);
   const rows = h.rows();
@@ -40,7 +40,7 @@ test('整列で行の高さが変わっても盤面の左上は動かない', as
   for (let i = 0; i < 13; i++) {
     h.dropIn(rows[2], `item${i}`, CONTENT_X + i * 10, 30);
   }
-  await h.send({ type: 'arrange-now' });
+  await h.send('ARRANGE_NOW');
 
   assert.deepEqual(h.absolute(container), before, '左上は固定');
   assert.ok(h.rows()[2].height > 300, '中身が増えた行だけ伸びる');
@@ -49,11 +49,11 @@ test('整列で行の高さが変わっても盤面の左上は動かない', as
 
 test('表を掴んで動かすと中身ごと動き、整列しても戻らない', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
   const container = h.containers()[0];
   const row = h.rows()[0];
   const sticky = h.dropIn(row, 'マイクラ', CONTENT_X, 30);
-  await h.send({ type: 'arrange-now' });
+  await h.send('ARRANGE_NOW');
 
   // ユーザーが表ごとドラッグした
   container.x += 2500;
@@ -61,21 +61,21 @@ test('表を掴んで動かすと中身ごと動き、整列しても戻らな�
   const moved = h.absolute(container);
   const stickyAt = h.absolute(sticky);
 
-  await h.send({ type: 'arrange-now' });
+  await h.send('ARRANGE_NOW');
 
   assert.deepEqual(h.absolute(container), moved, '動かした場所に留まる');
   assert.deepEqual(h.absolute(sticky), stickyAt, '中の付箋も一緒に動いている');
-  assert.equal(sticky.parent.id, row.id);
+  assert.equal(sticky.parent!.id, row.id);
 });
 
 test('1行だけ横にずらしても、整列で盤面の左端に揃う', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
   const rows = h.rows();
 
   rows[2].x = -900;
 
-  await h.send({ type: 'arrange-now' });
+  await h.send('ARRANGE_NOW');
 
   for (const row of h.rows()) {
     assert.equal(row.x, 0, '盤面の左端に揃う');

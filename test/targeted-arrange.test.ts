@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
-import { createHarness } from './harness.mjs';
+import { test } from 'vitest';
+import { createHarness, type FakeNode, type Harness } from './harness';
 
 const CONTENT_X = 300 + 24;
 
 // 行のなかに、左詰めになっていない位置で付箋を置く
-function scatter(h, row, names, offsets) {
+function scatter(h: Harness, row: FakeNode, names: string[], offsets: number[]): FakeNode[] {
   return names.map((name, i) => h.dropIn(row, name, CONTENT_X + offsets[i], 30));
 }
 
 test('ある行を触っても、別の行の中身は並び直さない', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
   await h.flush();
 
   const rows = h.rows();
@@ -35,13 +35,13 @@ test('ある行を触っても、別の行の中身は並び直さない', async
 
 test('別の盤面の中身も並び直さない', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
+  await h.send('CREATE_BOARD');
   await h.flush();
 
-  const boards = h.lastUiMessage().boards;
-  const rowsOf = (id) =>
-    h.rowsOf(h.containers().find((c) => c.getPluginData('figjamTierBoard') === id));
+  const boards = h.state().boards;
+  const rowsOf = (id: string) =>
+    h.rowsOf(h.containers().find((c) => c.getPluginData('figjamTierBoard') === id)!);
 
   const other = rowsOf(boards[1].id)[0];
   const untouched = scatter(h, other, ['X', 'Y'], [700, 1400]);
@@ -58,7 +58,7 @@ test('別の盤面の中身も並び直さない', async () => {
 
 test('付箋を行の外へ出すと、元の行だけが詰め直される', async () => {
   const h = createHarness();
-  await h.send({ type: 'create-board' });
+  await h.send('CREATE_BOARD');
   await h.flush();
   const rows = h.rows();
 
