@@ -13,6 +13,7 @@ import {
   SelectBoardHandler,
   SetAutoArrangeHandler,
   SetBoardNameHandler,
+  SetBoardThemeHandler,
   SetRowColorHandler,
   StateHandler,
 } from './events';
@@ -27,6 +28,13 @@ import {
   swapNeighbour,
 } from './domain/order';
 import { ArrangeQueue } from './domain/queue';
+import {
+  BoardTheme,
+  DEFAULT_BOARD_THEME,
+  paletteFor,
+  parseTheme,
+  themeForBackground,
+} from './domain/theme';
 
 // FigJam Tier表プラグイン
 //
@@ -47,6 +55,8 @@ const TIER_BOARD_NAME_KEY = 'figjamTierBoardName';
 const TIER_TITLE_KEY = 'figjamTierTitle';
 // 盤面をまるごと包むセクション。これを掴めば表ごと動かせる。
 const BOARD_FLAG_KEY = 'figjamTierBoardSection';
+// 盤面の配色。ライト/ダークを盤面ごとに持つ。
+const TIER_THEME_KEY = 'figjamTierTheme';
 // 付箋が最後にいた行。行から出ていった付箋の元の行を知るために使う。
 const ITEM_HOME_KEY = 'figjamTierHome';
 const TIER_LABEL_KEY = 'figjamTierLabel';
@@ -82,10 +92,7 @@ const RESCUE_MARGIN = 80;
 const TITLE_FONT_SIZE = 72;
 const TITLE_GAP = 32;
 
-const CONTENT_FILL: RGB = { r: 0.106, g: 0.106, b: 0.106 };
-const BORDER_STROKE: RGB = { r: 0.24, g: 0.24, b: 0.24 };
-// 見出しは暗い面の上に乗るので、既定の濃い文字色のままだと読めない。
-const TITLE_FILL: RGB = { r: 0.95, g: 0.95, b: 0.95 };
+
 
 // ドラッグ中に整列が割り込むと掴んでいる付箋が飛ぶので、変更が落ち着いてから走らせる。
 const ARRANGE_DEBOUNCE_MS = 320;
@@ -168,17 +175,43 @@ function newBoardId(): string {
   return `b${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
-function makeContainer(id: string, x: number, y: number, width: number, height: number): SectionNode {
+function makeContainer(
+  id: string,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  theme: BoardTheme,
+): SectionNode {
   const container = figma.createSection();
   container.setPluginData(BOARD_FLAG_KEY, '1');
   container.setPluginData(TIER_BOARD_KEY, id);
+  container.setPluginData(TIER_THEME_KEY, theme);
   container.name = 'Tier表';
   container.resizeWithoutConstraints(Math.max(width, 1), Math.max(height, 1));
   container.x = x;
   container.y = y;
-  container.fills = [{ type: 'SOLID', color: CONTENT_FILL }];
+  container.fills = [{ type: 'SOLID', color: hexToRgb(paletteFor(theme).content) }];
   figma.currentPage.appendChild(container);
   return container;
+}
+
+// 盤面の配色。持っていない盤面（配色を持たせる前に作られたもの）は既定のまま。
+// 開いた途端に色が変わるのは避ける。
+function boardThemeOf(container: SectionNode): BoardTheme {
+  return parseTheme(container.getPluginData(TIER_THEME_KEY), DEFAULT_BOARD_THEME);
+}
+
+// このページのキャンバス背景に合う配色。エディタのテーマ設定ではなく、実際に
+// 画面に映っている背景を見る。テーマは main スレッドからは読めないし、背景を
+// 手で変えている場合もそちらに合うため。
+function themeForCanvas(): BoardTheme {
+  for (const paint of figma.currentPage.backgrounds) {
+    if (paint.type === 'SOLID') {
+      return themeForBackground(paint.color, DEFAULT_BOARD_THEME);
+    }
+  }
+  return DEFAULT_BOARD_THEME;
 }
 
 // 盤面のセクションに入っていないティア行を拾う。
@@ -272,7 +305,7 @@ function wrapLooseRows(): void {
       maxY = Math.max(maxY, pos.y + row.height);
     }
 
-    const container = makeContainer(id, minX, minY, maxX - minX, maxY - minY);
+    const container = makeContainer(id, minX, minY, maxX - minX, maxY - minY, DEFAULT_BOARD_THEME);
     for (const row of rows) {
       const pos = pagePosition(row);
       container.appendChild(row);
@@ -531,21 +564,23 @@ function itemsOf(row: SectionNode): SceneNode[] {
 
 // 行そのものの見た目（暗い中身の面と境界線）。整列のたびに当て直すので、
 // 色セルが無かった頃に作られた盤面も、次の整列で新しい見た目に移行する。
-function applyRowChrome(row: SectionNode): void {
+function applyRowChrome(row: SectionNode, theme: BoardTheme): void {
+  const palette = paletteFor(theme);
+  const content = hexToRgb(palette.content);
   const fills = row.fills;
   if (typeof fills !== 'symbol' && fills.length === 1) {
     const paint = fills[0];
     if (
       paint.type === 'SOLID' &&
-      Math.abs(paint.color.r - CONTENT_FILL.r) < 0.002 &&
-      Math.abs(paint.color.g - CONTENT_FILL.g) < 0.002 &&
-      Math.abs(paint.color.b - CONTENT_FILL.b) < 0.002
+      Math.abs(paint.color.r - content.r) < 0.002 &&
+      Math.abs(paint.color.g - content.g) < 0.002 &&
+      Math.abs(paint.color.b - content.b) < 0.002
     ) {
       return;
     }
   }
-  row.fills = [{ type: 'SOLID', color: CONTENT_FILL }];
-  row.strokes = [{ type: 'SOLID', color: BORDER_STROKE }];
+  row.fills = [{ type: 'SOLID', color: content }];
+  row.strokes = [{ type: 'SOLID', color: hexToRgb(palette.border) }];
   row.strokeWeight = 1;
 }
 
@@ -600,7 +635,7 @@ async function createRow(
   row.setPluginData(TIER_BOARD_KEY, boardId);
   row.setPluginData(TIER_COLOR_KEY, colorKey);
   row.resizeWithoutConstraints(ROW_WIDTH, ROW_HEIGHT);
-  applyRowChrome(row);
+  applyRowChrome(row, boardThemeOf(container));
   container.appendChild(row);
   row.x = 0;
   row.y = y;
@@ -644,6 +679,10 @@ function relayout(container: SectionNode, rows: SectionNode[]): void {
     title.y = 0;
     remember(title);
   }
+  const palette = paletteFor(boardThemeOf(container));
+  const containerFill = hexToRgb(palette.content);
+  container.fills = [{ type: 'SOLID', color: containerFill }];
+
   const positions = stackPositions(
     rows.map((row) => row.height),
     ROW_GAP,
@@ -676,8 +715,8 @@ function boardWidth(rows: SectionNode[]): number {
 // 行の中身を左上から詰め直す。順位は読み順（上の段が先、同じ段では左が先）
 // なので、ドラッグして落とした位置がそのまま順位になり、落とした先の付箋と
 // 場所が入れ替わる。横幅に収まらない分は折り返し、必要なら行の高さを伸ばす。
-async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> {
-  applyRowChrome(row);
+async function arrangeRow(row: SectionNode, targetWidth: number, theme: BoardTheme): Promise<void> {
+  applyRowChrome(row, theme);
   const label = await ensureLabel(row);
   const layout = layoutRow(itemsOf(row), targetWidth, ROW_METRICS);
   const needed = layout.height;
@@ -724,6 +763,7 @@ async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> 
 //   - 色セルを持たない行がある（古い盤面の移行。中身の置き場所も変わる）
 async function arrangeBoards(targets: string[] | null, rowDragged: boolean): Promise<void> {
   for (const board of getBoards()) {
+    const theme = boardThemeOf(board.container);
     const returnedLabels = repatriateLabels(board);
     const returnedItems = rowDragged ? repatriateItems(board) : [];
     const adopted = adoptStrays(board);
@@ -744,7 +784,7 @@ async function arrangeBoards(targets: string[] | null, rowDragged: boolean): Pro
         returnedItems.indexOf(row) >= 0 ||
         targets.indexOf(row.id) >= 0
       ) {
-        await arrangeRow(row, width);
+        await arrangeRow(row, width, theme);
         touched = true;
       }
     }
@@ -835,6 +875,7 @@ function postRows(): void {
       rowCount: board.rows.length,
     })),
     activeBoardId,
+    boardTheme: active !== null ? boardThemeOf(active.container) : DEFAULT_BOARD_THEME,
     rows,
     presets: COLOR_PRESETS,
     autoArrange,
@@ -876,7 +917,14 @@ async function createBoard(): Promise<void> {
   const totalHeight = DEFAULT_TIERS.length * ROW_HEIGHT + (DEFAULT_TIERS.length - 1) * ROW_GAP;
   const origin = boardOrigin(totalHeight);
   const boardId = newBoardId();
-  const container = makeContainer(boardId, origin.x, origin.y, ROW_WIDTH, totalHeight);
+  const container = makeContainer(
+    boardId,
+    origin.x,
+    origin.y,
+    ROW_WIDTH,
+    totalHeight,
+    themeForCanvas(),
+  );
 
   const created: SectionNode[] = [];
   for (let i = 0; i < DEFAULT_TIERS.length; i++) {
@@ -1041,8 +1089,23 @@ async function setBoardName(boardId: string, rawName: string): Promise<void> {
     title.characters = name;
     title.fontSize = TITLE_FONT_SIZE;
   }
-  title.fills = [{ type: 'SOLID', color: TITLE_FILL }];
+  title.fills = [{ type: 'SOLID', color: hexToRgb(paletteFor(boardThemeOf(board.container)).title) }];
   relayout(board.container, board.rows);
+}
+
+// 配色の切り替え。キャンバスの色はドキュメントのデータなので、これは
+// 見ている人ごとの設定ではなく盤面ごとの設定（全員に反映される）。
+function setBoardTheme(boardId: string, theme: BoardTheme): void {
+  const board = findBoard(getBoards(), boardId);
+  if (board === null) {
+    return;
+  }
+  board.container.setPluginData(TIER_THEME_KEY, theme);
+  for (const row of board.rows) {
+    markRow(row.id);
+  }
+  queue.markAll();
+  void runArrange();
 }
 
 async function setAutoArrange(enabled: boolean): Promise<void> {
@@ -1095,6 +1158,9 @@ function registerUiHandlers(): void {
   on<ArrangeNowHandler>('ARRANGE_NOW', () => {
     queue.markAll();
     void runArrange();
+  });
+  on<SetBoardThemeHandler>('SET_BOARD_THEME', (boardId, theme) => {
+    setBoardTheme(boardId, theme);
   });
   on<SetAutoArrangeHandler>('SET_AUTO_ARRANGE', (enabled) => {
     void setAutoArrange(enabled).then(refresh);

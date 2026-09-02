@@ -21,7 +21,11 @@ export interface ColorPreset {
   hex: string;
 }
 
+export type BoardTheme = 'light' | 'dark';
+
 export interface PanelState {
+  /** 選択中の盤面の配色 */
+  boardTheme: BoardTheme;
   boards: BoardView[];
   activeBoardId: string | null;
   rows: RowView[];
@@ -78,6 +82,11 @@ export interface ArrangeNowHandler extends EventHandler {
 export interface SetAutoArrangeHandler extends EventHandler {
   name: 'SET_AUTO_ARRANGE';
   handler: (enabled: boolean) => void;
+}
+
+export interface SetBoardThemeHandler extends EventHandler {
+  name: 'SET_BOARD_THEME';
+  handler: (boardId: string, theme: BoardTheme) => void;
 }
 
 // main → UI
