@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createHarness } from './harness.mjs';
 
-// 色セルが無く、行に色が塗ってあり、幅も狭い ── 旧バージョンが作った盤面
+// 色セルが無く、行に色が塗ってあり、幅も狭く、器にも入っていない
+// ── 旧バージョンが作った盤面
 function legacyRow(h, { name, color, x, y, width }) {
   const row = h.figma.createSection();
   row.name = name;
@@ -16,15 +17,32 @@ function legacyRow(h, { name, color, x, y, width }) {
   return row;
 }
 
-test('色セルが無い頃の盤面は、次の整列で新しい見た目に移行する', async () => {
+test('器に入っていない旧盤面は、まとめてひとつの盤面として包み直される', async () => {
   const h = createHarness();
   const legacy = [
-    legacyRow(h, { name: 'S', color: 'red', x: 0, y: 0, width: 1608 }),
-    legacyRow(h, { name: 'A', color: 'orange', x: 0, y: 340, width: 1608 }),
+    legacyRow(h, { name: 'S', color: 'red', x: 100, y: 200, width: 1608 }),
+    legacyRow(h, { name: 'A', color: 'orange', x: 100, y: 540, width: 1608 }),
   ];
-  const sticky = h.createSticky('マイクラ', 24, 30);
+  const sticky = h.createSticky('マイクラ', 124, 230);
   h.settle();
   assert.equal(h.items(legacy[0]).length, 1, '付箋は旧盤面の中にいる');
+
+  await h.send({ type: 'arrange-now' });
+
+  const containers = h.containers();
+  assert.equal(containers.length, 1, '器がひとつできる');
+  assert.deepEqual(h.absolute(containers[0]), { x: 100, y: 200 }, '元の場所を保つ');
+  for (const row of h.rows()) {
+    assert.equal(row.parent.id, containers[0].id, '行は器の子になる');
+  }
+});
+
+test('包み直しても中身と見た目は移行する', async () => {
+  const h = createHarness();
+  legacyRow(h, { name: 'S', color: 'red', x: 0, y: 0, width: 1608 });
+  legacyRow(h, { name: 'A', color: 'orange', x: 0, y: 340, width: 1608 });
+  const sticky = h.createSticky('マイクラ', 24, 30);
+  h.settle();
 
   await h.send({ type: 'arrange-now' });
 
@@ -42,7 +60,7 @@ test('色セルが無い頃の盤面は、次の整列で新しい見た目に�
   }
 
   assert.equal(h.rows()[1].y, h.rows()[0].y + h.rows()[0].height, '隙間が詰まる');
-  assert.equal(sticky.parent.id, legacy[0].id, '中身は行に残る');
+  assert.equal(sticky.parent.id, h.rows()[0].id, '中身は行に残る');
   assert.equal(sticky.x, 324, '色セルの右へ寄せ直される');
 });
 
@@ -55,4 +73,19 @@ test('移行後の整列は面を塗り直さない', async () => {
   await h.send({ type: 'arrange-now' });
 
   assert.equal(h.rows()[0].fills, fills, '同じ配列のまま（無駄な書き込みをしない）');
+});
+
+test('包み直したあとは表ごと動かせる', async () => {
+  const h = createHarness();
+  legacyRow(h, { name: 'S', color: 'red', x: 0, y: 0, width: 1608 });
+  legacyRow(h, { name: 'A', color: 'orange', x: 0, y: 340, width: 1608 });
+  await h.send({ type: 'arrange-now' });
+
+  const container = h.containers()[0];
+  container.x += 900;
+  h.settle();
+  await h.send({ type: 'arrange-now' });
+
+  assert.equal(h.absolute(container).x, 900, '動かした場所に留まる');
+  assert.equal(h.rows().length, 2);
 });

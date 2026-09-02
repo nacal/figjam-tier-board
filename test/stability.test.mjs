@@ -20,9 +20,8 @@ test('折り返した行を何度整列しても結果が変わらない', async
 
   // 2段に折り返す枚数
   for (let i = 0; i < 13; i++) {
-    h.createSticky(`item${i}`, row.x + CONTENT_X + i * 10, row.y + 30);
+    h.dropIn(row, `item${i}`, CONTENT_X + i * 10, 30);
   }
-  h.settle();
 
   await h.send({ type: 'arrange-now' });
   const first = snapshot(h, row);
@@ -43,9 +42,8 @@ test('折り返した行は読み順（上の段が先、同じ段では左が�
   const names = [];
   for (let i = 0; i < 13; i++) {
     names.push(`item${i}`);
-    h.createSticky(`item${i}`, row.x + CONTENT_X + i * 100, row.y + 30);
+    h.dropIn(row, `item${i}`, CONTENT_X + i * 100, 30);
   }
-  h.settle();
   await h.send({ type: 'arrange-now' });
 
   const read = h.items(row).sort((a, b) => a.y - b.y || a.x - b.x).map((n) => n.name);
@@ -64,9 +62,8 @@ test('折り返した行を触っても整列が止まらなくならない', as
 
   const items = [];
   for (let i = 0; i < 13; i++) {
-    items.push(h.createSticky(`item${i}`, row.x + CONTENT_X + i * 100, row.y + 30));
+    items.push(h.dropIn(row, `item${i}`, CONTENT_X + i * 100, 30));
   }
-  h.settle();
   h.change(items);
   await h.flush();
 
@@ -85,9 +82,8 @@ test('2段目の付箋を1段目へドラッグすると、その位置の順位
 
   const items = [];
   for (let i = 0; i < 12; i++) {
-    items.push(h.createSticky(`item${i}`, row.x + CONTENT_X + i * 100, row.y + 30));
+    items.push(h.dropIn(row, `item${i}`, CONTENT_X + i * 100, 30));
   }
-  h.settle();
   await h.send({ type: 'arrange-now' });
 
   // 2段目の先頭（item10）を1段目の先頭と2番目のあいだへ
@@ -110,9 +106,8 @@ test('背の高い付箋が混ざっても段の判定が崩れない', async ()
 
   const items = [];
   for (let i = 0; i < 13; i++) {
-    items.push(h.createSticky(`item${i}`, row.x + CONTENT_X + i * 100, row.y + 30));
+    items.push(h.dropIn(row, `item${i}`, CONTENT_X + i * 100, 30));
   }
-  h.settle();
   await h.send({ type: 'arrange-now' });
   assert.equal(h.items(row).length, 13, '13枚とも行の中にいる');
 

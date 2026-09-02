@@ -229,37 +229,61 @@ export function createHarness() {
   const code = readFileSync(new URL('../dist/code.js', import.meta.url), 'utf8');
   runInNewContext(code, sandbox);
 
-  // FigJam のセクションは、重なったノードを自動的に子にする。中心が
-  // セクションの矩形に入っていれば取り込み、外に出れば手放す、として近似する。
+  // FigJam のセクションは、重なったノードを自動的に子にする。中心が入って
+  // いれば取り込み、外に出れば手放す、として近似する。盤面のセクションの中に
+  // 行のセクションがあるので、いちばん内側のセクションに属させる。
   function settle() {
     const sections = page.findAllWithCriteria({ types: ['SECTION'] });
-    for (const section of sections) {
-      for (const child of [...section.children]) {
-        const pos = absolute(child);
-        const cx = pos.x + child.width / 2;
-        const cy = pos.y + child.height / 2;
+    const depthOf = (node) => {
+      let depth = 0;
+      let parent = node.parent;
+      while (parent && parent.type === 'SECTION') {
+        depth += 1;
+        parent = parent.parent;
+      }
+      return depth;
+    };
+
+    const loose = [];
+    const walk = (nodes) => {
+      for (const node of nodes) {
+        if (node.type === 'SECTION') walk(node.children);
+        else loose.push(node);
+      }
+    };
+    walk(page.children);
+
+    for (const node of loose) {
+      const pos = absolute(node);
+      const cx = pos.x + node.width / 2;
+      const cy = pos.y + node.height / 2;
+
+      let host = null;
+      for (const section of sections) {
+        const at = absolute(section);
         const inside =
-          cx >= section.x && cx <= section.x + section.width && cy >= section.y && cy <= section.y + section.height;
-        if (!inside) {
-          page.appendChild(child);
-          child.x = pos.x;
-          child.y = pos.y;
+          cx >= at.x && cx <= at.x + section.width && cy >= at.y && cy <= at.y + section.height;
+        if (inside && (host === null || depthOf(section) > depthOf(host))) {
+          host = section;
         }
       }
-    }
-    for (const node of [...page.children]) {
-      if (node.type === 'SECTION') continue;
-      const cx = node.x + node.width / 2;
-      const cy = node.y + node.height / 2;
-      const host = sections.find(
-        (s) => cx >= s.x && cx <= s.x + s.width && cy >= s.y && cy <= s.y + s.height,
-      );
-      if (host) {
-        host.appendChild(node);
-        node.x -= host.x;
-        node.y -= host.y;
+
+      const target = host ?? page;
+      if (node.parent !== target) {
+        const at = target === page ? { x: 0, y: 0 } : absolute(target);
+        target.appendChild(node);
+        node.x = pos.x - at.x;
+        node.y = pos.y - at.y;
       }
     }
+  }
+
+  // 行の中の座標（左上からの相対）を指定して付箋を置く
+  function dropIn(row, text, dx, dy) {
+    const at = absolute(row);
+    const sticky = createSticky(text, at.x + dx, at.y + dy);
+    settle();
+    return sticky;
   }
 
   function createSticky(text, x, y) {
@@ -332,6 +356,26 @@ export function createHarness() {
     return row.children.find((child) => child.getPluginData?.('figjamTierLabel') === '1') ?? null;
   }
 
+  // 盤面（行を包むセクション）を上から順に
+  function containers() {
+    return page
+      .findAllWithCriteria({ types: ['SECTION'] })
+      .filter((s) => s.getPluginData('figjamTierBoardSection') === '1')
+      .sort((a, b) => absolute(a).y - absolute(b).y);
+  }
+
+  function rowsOf(container) {
+    return container.children
+      .filter((c) => c.getPluginData?.('figjamTierRow') === '1')
+      .sort((a, b) => a.y - b.y);
+  }
+
+  function titleOf(container) {
+    return container.children.find(
+      (c) => c.type === 'TEXT' && c.getPluginData?.('figjamTierTitle') === '1',
+    ) ?? null;
+  }
+
   function rows() {
     return page
       .findAllWithCriteria({ types: ['SECTION'] })
@@ -347,9 +391,13 @@ export function createHarness() {
     flush,
     select,
     rows,
+    containers,
+    rowsOf,
+    titleOf,
     items,
     label,
     createSticky,
+    dropIn,
     settle,
     notifications,
     uiMessages,

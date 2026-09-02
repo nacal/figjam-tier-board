@@ -10,6 +10,7 @@ test('既定の幅は付箋10枚ぶん', async () => {
   for (const row of h.rows()) {
     assert.equal(row.width, DEFAULT_WIDTH);
   }
+  assert.equal(h.containers()[0].width, DEFAULT_WIDTH, '表の幅も行に合う');
 });
 
 test('1行の幅を変えると全行が同じ幅になる', async () => {
@@ -25,6 +26,7 @@ test('1行の幅を変えると全行が同じ幅になる', async () => {
   for (const row of h.rows()) {
     assert.equal(row.width, widened, '全行が広がる');
   }
+  assert.equal(h.containers()[0].width, widened, '表ごと広がる');
 });
 
 test('幅を狭めると折り返しの枚数も減る', async () => {
@@ -33,9 +35,8 @@ test('幅を狭めると折り返しの枚数も減る', async () => {
   const row = h.rows()[0];
 
   for (let i = 0; i < 6; i++) {
-    h.createSticky(`item${i}`, row.x + 324 + i * 10, row.y + 30);
+    h.dropIn(row, `item${i}`, 324 + i * 10, 30);
   }
-  h.settle();
   await h.send({ type: 'arrange-now' });
   assert.equal(row.height, 300, '6枚は1段に収まる');
 
