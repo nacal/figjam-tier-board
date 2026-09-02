@@ -1,3 +1,23 @@
+import { emit, on, showUI } from '@create-figma-plugin/utilities';
+
+import {
+  AddRowHandler,
+  ArrangeNowHandler,
+  ColorPreset,
+  CreateBoardHandler,
+  DeleteRowHandler,
+  MoveRowHandler,
+  PanelState,
+  RenameRowHandler,
+  ReorderRowsHandler,
+  RequestStateHandler,
+  SelectBoardHandler,
+  SetAutoArrangeHandler,
+  SetBoardNameHandler,
+  SetRowColorHandler,
+  StateHandler,
+} from './events';
+
 // FigJam Tier表プラグイン
 //
 // 行（ティア）は SectionNode で表現する。セクションは幾何的に内包したノードを
@@ -63,12 +83,6 @@ const DEFAULT_TIERS: Array<{ name: string; color: string }> = [
   { name: 'D', color: 'green' },
 ];
 
-interface ColorPreset {
-  key: string;
-  label: string;
-  hex: string;
-}
-
 const COLOR_PRESETS: ColorPreset[] = [
   { key: 'red', label: 'レッド', hex: '#F19A9A' },
   { key: 'orange', label: 'オレンジ', hex: '#F5BC85' },
@@ -84,7 +98,7 @@ const FALLBACK_COLOR_KEY = 'gray';
 
 let autoArrange = true;
 let activeBoardId: string | null = null;
-let arrangeTimer: number | null = null;
+let arrangeTimer: ReturnType<typeof setTimeout> | null = null;
 
 // 次の整列で触る行。触っていない行の中身まで並び直さないための的。
 let pendingRowIds: string[] = [];
@@ -916,8 +930,7 @@ function postRows(): void {
     color: row.getPluginData(TIER_COLOR_KEY) || FALLBACK_COLOR_KEY,
     count: itemsOf(row).length,
   }));
-  figma.ui.postMessage({
-    type: 'rows',
+  const state: PanelState = {
     boards: boards.map((board, index) => ({
       id: board.id,
       name: boardName(board),
@@ -929,7 +942,8 @@ function postRows(): void {
     presets: COLOR_PRESETS,
     autoArrange,
     subscriptions,
-  });
+  };
+  emit<StateHandler>('STATE', state);
 }
 
 async function getRowById(id: string): Promise<SectionNode | null> {
@@ -1173,62 +1187,52 @@ async function setAutoArrange(enabled: boolean): Promise<void> {
   }
 }
 
-interface UiMessage {
-  type: string;
-  id?: string;
-  ids?: string[];
-  name?: string;
-  color?: string;
-  direction?: 'up' | 'down';
-  enabled?: boolean;
-  boardId?: string;
+
+// UI からのイベント。名前とペイロードは events.ts で宣言してあるので、
+// 綴り違いも引数の取り違えもコンパイルで落ちる。
+function registerUiHandlers(): void {
+  const refresh = (): void => {
+    postRows();
+  };
+
+  on<RequestStateHandler>('REQUEST_STATE', refresh);
+  on<CreateBoardHandler>('CREATE_BOARD', () => {
+    void createBoard().then(refresh);
+  });
+  on<AddRowHandler>('ADD_ROW', () => {
+    void addRow().then(refresh);
+  });
+  on<DeleteRowHandler>('DELETE_ROW', (rowId) => {
+    void deleteRow(rowId).then(refresh);
+  });
+  on<RenameRowHandler>('RENAME_ROW', (rowId, name) => {
+    void renameRow(rowId, name).then(refresh);
+  });
+  on<SetRowColorHandler>('SET_ROW_COLOR', (rowId, colorKey) => {
+    void setRowColor(rowId, colorKey).then(refresh);
+  });
+  on<MoveRowHandler>('MOVE_ROW', (rowId, direction) => {
+    void moveRow(rowId, direction).then(refresh);
+  });
+  on<ReorderRowsHandler>('REORDER_ROWS', (rowIds) => {
+    reorderRows(rowIds);
+    refresh();
+  });
+  on<SelectBoardHandler>('SELECT_BOARD', (boardId) => {
+    activeBoardId = boardId;
+    refresh();
+  });
+  on<SetBoardNameHandler>('SET_BOARD_NAME', (boardId, name) => {
+    void setBoardName(boardId, name).then(refresh);
+  });
+  on<ArrangeNowHandler>('ARRANGE_NOW', () => {
+    pendingAll = true;
+    void runArrange();
+  });
+  on<SetAutoArrangeHandler>('SET_AUTO_ARRANGE', (enabled) => {
+    void setAutoArrange(enabled).then(refresh);
+  });
 }
-
-figma.showUI(__html__, { width: 340, height: 520, themeColors: true });
-
-figma.ui.onmessage = async (message: UiMessage) => {
-  switch (message.type) {
-    case 'init':
-      break;
-    case 'create-board':
-      await createBoard();
-      break;
-    case 'add-row':
-      await addRow();
-      break;
-    case 'delete-row':
-      await deleteRow(message.id as string);
-      break;
-    case 'rename-row':
-      await renameRow(message.id as string, message.name as string);
-      break;
-    case 'set-color':
-      await setRowColor(message.id as string, message.color as string);
-      break;
-    case 'move-row':
-      await moveRow(message.id as string, message.direction as 'up' | 'down');
-      break;
-    case 'reorder-rows':
-      reorderRows(message.ids as string[]);
-      break;
-    case 'select-board':
-      activeBoardId = message.boardId as string;
-      break;
-    case 'set-board-name':
-      await setBoardName(message.boardId as string, message.name as string);
-      break;
-    case 'arrange-now':
-      pendingAll = true;
-      await runArrange();
-      return;
-    case 'set-auto-arrange':
-      await setAutoArrange(message.enabled === true);
-      break;
-    default:
-      break;
-  }
-  postRows();
-};
 
 // キャンバス側の操作を拾って整列する。REMOTE（他の参加者の操作）に反応すると
 // 全員が同じ行を奪い合って動かし続けるので、自分の操作だけを見る。
@@ -1350,20 +1354,27 @@ function boardIdFromSelection(): string | null {
   return null;
 }
 
-figma.on('selectionchange', () => {
+function handleSelectionChange(): void {
   const id = boardIdFromSelection();
   if (id !== null && id !== activeBoardId) {
     activeBoardId = id;
     postRows();
   }
-});
+}
 
-// 購読は同期で張る。読み込みを待ってから張ると、待っているあいだの操作を
-// 取りこぼす。
-subscribeToCanvas();
-
-(async () => {
+async function restoreSettings(): Promise<void> {
   const stored = await figma.clientStorage.getAsync(AUTO_ARRANGE_KEY);
   autoArrange = stored !== false;
   postRows();
-})();
+}
+
+// プラグインのエントリ。create-figma-plugin はこのデフォルトエクスポートを呼ぶ。
+export default function main(): void {
+  showUI({ width: 340, height: 560, themeColors: true });
+  registerUiHandlers();
+  // 購読は同期で張る。読み込みを待ってから張ると、待っているあいだの操作を
+  // 取りこぼす。
+  subscribeToCanvas();
+  figma.on('selectionchange', handleSelectionChange);
+  void restoreSettings();
+}
