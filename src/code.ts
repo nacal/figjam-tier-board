@@ -13,6 +13,8 @@ const TIER_FLAG_KEY = 'figjamTierRow';
 const TIER_COLOR_KEY = 'figjamTierColor';
 const TIER_WIDTH_KEY = 'figjamTierWidth';
 const TIER_BOARD_KEY = 'figjamTierBoard';
+const TIER_BOARD_NAME_KEY = 'figjamTierBoardName';
+const TIER_TITLE_KEY = 'figjamTierTitle';
 const TIER_LABEL_KEY = 'figjamTierLabel';
 const AUTO_ARRANGE_KEY = 'autoArrange';
 
@@ -31,14 +33,15 @@ const ROW_WIDTH =
 const BOARD_MARGIN = 160;
 // 行を削除したとき、中身を盤面の下へ逃がす距離。
 const RESCUE_MARGIN = 80;
+// 盤面の名前を出す見出しの大きさと、いちばん上の行との間隔。
+const TITLE_FONT_SIZE = 72;
+const TITLE_GAP = 32;
 
 const CONTENT_FILL: RGB = { r: 0.106, g: 0.106, b: 0.106 };
 const BORDER_STROKE: RGB = { r: 0.24, g: 0.24, b: 0.24 };
 
 // ドラッグ中に整列が割り込むと掴んでいる付箋が飛ぶので、変更が落ち着いてから走らせる。
 const ARRANGE_DEBOUNCE_MS = 320;
-// 整列そのものが nodechange を起こす。その反響を無視するための窓。
-const ARRANGE_SUPPRESS_MS = 400;
 
 const DEFAULT_TIERS: Array<{ name: string; color: string }> = [
   { name: 'S', color: 'red' },
@@ -70,7 +73,17 @@ const FALLBACK_COLOR_KEY = 'gray';
 let autoArrange = true;
 let activeBoardId: string | null = null;
 let arrangeTimer: number | null = null;
-let suppressUntil = 0;
+
+// 次の整列で触る行。触っていない行の中身まで並び直さないための的。
+let pendingRowIds: string[] = [];
+let pendingAll = false;
+// 前回の整列時点で、どの付箋がどの行にいたか。付箋が行から出ていったとき、
+// 出ていった先の情報だけでは元の行が分からないので覚えておく。
+let itemHome: { [nodeId: string]: string } = {};
+// 整列が最後に書き込んだ位置と大きさ。整列そのものが nodechange を起こすので、
+// その反響と人の操作を見分けるために使う。時間で無視する窓にすると、整列の
+// 直後に動かした付箋がまるごと取りこぼされる。
+let written: { [nodeId: string]: string } = {};
 
 function hexToRgb(hex: string): RGB {
   const value = parseInt(hex.slice(1), 16);
@@ -158,6 +171,51 @@ function getBoards(): Board[] {
     grouped[id].push(row);
   }
   return order.map((id) => ({ id, rows: grouped[id] }));
+}
+
+function boardName(board: Board): string {
+  for (const row of board.rows) {
+    const name = row.getPluginData(TIER_BOARD_NAME_KEY);
+    if (name !== '') {
+      return name;
+    }
+  }
+  return '';
+}
+
+// 盤面の名前はキャンバス上にも見出しとして出す。パネルの中だけに持っていても
+// 一緒に見ている人には見えないため。名前が空のときは見出しを置かない。
+function findTitle(boardId: string): TextNode | null {
+  for (const node of figma.currentPage.children) {
+    if (node.type === 'TEXT' && node.getPluginData(TIER_TITLE_KEY) === boardId) {
+      return node;
+    }
+  }
+  return null;
+}
+
+function topRow(rows: SectionNode[]): SectionNode {
+  let top = rows[0];
+  for (const row of rows) {
+    if (row.y < top.y) {
+      top = row;
+    }
+  }
+  return top;
+}
+
+function positionTitle(rows: SectionNode[]): void {
+  if (rows.length === 0) {
+    return;
+  }
+  const title = findTitle(rows[0].getPluginData(TIER_BOARD_KEY));
+  if (title === null) {
+    return;
+  }
+  const top = topRow(rows);
+  title.x = top.x;
+  title.y = top.y - TITLE_GAP - title.height;
+  remember(title);
 }
 
 function findBoard(boards: Board[], id: string | null): Board | null {
@@ -302,19 +360,16 @@ function relayout(rows: SectionNode[]): void {
   if (rows.length === 0) {
     return;
   }
-  let top = rows[0];
-  for (const row of rows) {
-    if (row.y < top.y) {
-      top = row;
-    }
-  }
+  const top = topRow(rows);
   const anchorX = top.x;
   let cursorY = top.y;
   for (const row of rows) {
     row.x = anchorX;
     row.y = cursorY;
     cursorY += row.height + ROW_GAP;
+    remember(row);
   }
+  positionTitle(rows);
 }
 
 // 盤面の幅。ユーザーがどれか1行の幅を変えたら、それを全行に広げる。
@@ -401,6 +456,8 @@ async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> 
       item.x = cursorX;
       item.y = cursorY;
       cursorX += item.width + ITEM_GAP;
+      itemHome[item.id] = row.id;
+      remember(item);
     }
     cursorY += lineHeights[i] + ITEM_GAP;
   }
@@ -409,25 +466,72 @@ async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> 
     row.resizeWithoutConstraints(targetWidth, needed);
   }
   row.setPluginData(TIER_WIDTH_KEY, String(targetWidth));
+  remember(label);
+  remember(row);
 }
 
 // 盤面ごとに幅を決めて整列し、その盤面のなかだけで詰め直す。
 // 幅も並びも盤面をまたがない。
-async function arrangeAll(): Promise<void> {
+//
+// targets が null なら全部、そうでなければその行だけを並べ直す。触っていない
+// 行の中身まで並び直すと、別の行を触っただけで順位が勝手に組み替わって見える。
+// ただし次の場合は、指定が無くてもその盤面の行を全部並べ直す:
+//   - 盤面の幅が変わった（全行を同じ幅に揃える必要がある）
+//   - 色セルを持たない行がある（古い盤面の移行。中身の置き場所も変わる）
+async function arrangeBoards(targets: string[] | null): Promise<void> {
   for (const board of getBoards()) {
     const width = boardWidth(board.rows);
+    let forceWhole = false;
     for (const row of board.rows) {
-      await arrangeRow(row, width);
+      if (Math.abs(row.width - width) > 0.5 || findLabel(row) === null) {
+        forceWhole = true;
+      }
     }
-    relayout(board.rows);
+    let touched = false;
+    for (const row of board.rows) {
+      if (targets === null || forceWhole || targets.indexOf(row.id) >= 0) {
+        await arrangeRow(row, width);
+        touched = true;
+      }
+    }
+    if (touched) {
+      relayout(board.rows);
+    }
   }
 }
 
 async function runArrange(): Promise<void> {
-  suppressUntil = Date.now() + ARRANGE_SUPPRESS_MS;
-  await arrangeAll();
-  suppressUntil = Date.now() + ARRANGE_SUPPRESS_MS;
+  const targets = pendingAll ? null : pendingRowIds;
+  pendingAll = false;
+  pendingRowIds = [];
+  await arrangeBoards(targets);
   postRows();
+}
+
+function stamp(node: SceneNode): string {
+  return `${node.x}:${node.y}:${node.width}:${node.height}`;
+}
+
+function remember(node: SceneNode): void {
+  written[node.id] = stamp(node);
+}
+
+function markRow(rowId: string | null): void {
+  if (rowId !== null && pendingRowIds.indexOf(rowId) < 0) {
+    pendingRowIds.push(rowId);
+  }
+}
+
+// ノードが今いる行。付箋そのものでも、行そのものでも辿れる。
+function rowIdOf(node: BaseNode): string | null {
+  let cursor: BaseNode | null = node;
+  while (cursor !== null) {
+    if (isTierRow(cursor)) {
+      return cursor.id;
+    }
+    cursor = cursor.parent;
+  }
+  return null;
 }
 
 function scheduleArrange(): void {
@@ -454,7 +558,8 @@ function postRows(): void {
     type: 'rows',
     boards: boards.map((board, index) => ({
       id: board.id,
-      label: `盤面 ${index + 1}`,
+      name: boardName(board),
+      label: boardName(board) || `盤面 ${index + 1}`,
       rowCount: board.rows.length,
     })),
     activeBoardId,
@@ -506,6 +611,10 @@ async function createBoard(): Promise<void> {
     );
   }
   activeBoardId = boardId;
+  for (const row of created) {
+    markRow(row.id);
+  }
+  scheduleArrange();
   figma.viewport.scrollAndZoomIntoView(created);
 }
 
@@ -538,6 +647,8 @@ async function addRow(): Promise<void> {
     last.y + last.height + ROW_GAP,
   );
   row.resizeWithoutConstraints(boardWidth(board.rows), ROW_HEIGHT);
+  markRow(row.id);
+  scheduleArrange();
   figma.viewport.scrollAndZoomIntoView([row]);
 }
 
@@ -572,8 +683,16 @@ async function deleteRow(id: string): Promise<void> {
   const board = boardOfRow(getBoards(), id);
   const siblings = board !== null ? board.rows : [row];
   const rescued = rescueItems(row, rescueDropY());
+  const boardId = row.getPluginData(TIER_BOARD_KEY);
   row.remove();
-  relayout(siblings.filter((candidate) => candidate.id !== id));
+  const left = siblings.filter((candidate) => candidate.id !== id);
+  relayout(left);
+  if (left.length === 0) {
+    const title = findTitle(boardId);
+    if (title !== null) {
+      title.remove();
+    }
+  }
   if (rescued > 0) {
     figma.notify(`${rescued} 個のアイテムをキャンバスの下に移しました`);
   }
@@ -650,10 +769,48 @@ function reorderRows(ids: string[]): void {
   relayout(ordered);
 }
 
+async function setBoardName(boardId: string, rawName: string): Promise<void> {
+  const board = findBoard(getBoards(), boardId);
+  if (board === null) {
+    return;
+  }
+  const name = rawName.trim();
+  for (const row of board.rows) {
+    row.setPluginData(TIER_BOARD_NAME_KEY, name);
+  }
+
+  const existing = findTitle(boardId);
+  if (name === '') {
+    if (existing !== null) {
+      existing.remove();
+    }
+    return;
+  }
+
+  let title = existing;
+  if (title === null) {
+    title = figma.createText();
+    title.setPluginData(TIER_TITLE_KEY, boardId);
+    // 作った直後はページの原点にいる。行に重なっているとセクションに
+    // 取り込まれてしまうので、先に盤面の上へ逃がしてから中身を入れる。
+    const top = topRow(board.rows);
+    title.x = top.x;
+    title.y = top.y - TITLE_GAP - TITLE_FONT_SIZE * 1.5;
+  }
+  const fontName = title.fontName;
+  if (typeof fontName !== 'symbol') {
+    await figma.loadFontAsync(fontName);
+    title.characters = name;
+    title.fontSize = TITLE_FONT_SIZE;
+  }
+  positionTitle(board.rows);
+}
+
 async function setAutoArrange(enabled: boolean): Promise<void> {
   autoArrange = enabled;
   await figma.clientStorage.setAsync(AUTO_ARRANGE_KEY, enabled);
   if (enabled) {
+    pendingAll = true;
     await runArrange();
   }
 }
@@ -699,7 +856,11 @@ figma.ui.onmessage = async (message: UiMessage) => {
     case 'select-board':
       activeBoardId = message.boardId as string;
       break;
+    case 'set-board-name':
+      await setBoardName(message.boardId as string, message.name as string);
+      break;
     case 'arrange-now':
+      pendingAll = true;
       await runArrange();
       return;
     case 'set-auto-arrange':
@@ -708,23 +869,43 @@ figma.ui.onmessage = async (message: UiMessage) => {
     default:
       break;
   }
-  if (autoArrange) {
-    scheduleArrange();
-  }
   postRows();
 };
 
 // キャンバス側の操作を拾って整列する。REMOTE（他の参加者の操作）に反応すると
 // 全員が同じ行を奪い合って動かし続けるので、自分の操作だけを見る。
 figma.currentPage.on('nodechange', (event: NodeChangeEvent) => {
-  if (!autoArrange || Date.now() < suppressUntil) {
+  if (!autoArrange) {
     return;
   }
+  let marked = false;
   for (const change of event.nodeChanges) {
-    if (change.origin === 'LOCAL') {
-      scheduleArrange();
-      return;
+    if (change.origin !== 'LOCAL') {
+      continue;
     }
+    const node = change.node;
+    const alive = !('removed' in node);
+    // 整列が書いた位置と大きさのままなら、それは自分の書き込みの反響。
+    if (alive && written[change.id] === stamp(node)) {
+      continue;
+    }
+    // 出ていった先だけでは元の行が分からないので、前回いた行も的に入れる。
+    // これが無いと、付箋を行の外へ出したあと元の行に穴が残る。
+    const previous = itemHome[change.id];
+    if (previous !== undefined) {
+      markRow(previous);
+      marked = true;
+    }
+    if (alive) {
+      const current = rowIdOf(node);
+      if (current !== null) {
+        markRow(current);
+        marked = true;
+      }
+    }
+  }
+  if (marked) {
+    scheduleArrange();
   }
 });
 
