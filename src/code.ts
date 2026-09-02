@@ -685,8 +685,13 @@ async function runArrange(): Promise<void> {
   postRows();
 }
 
+// 親も入れる。行はどれも同じ幅・同じ高さで縦に並んでいるので、位置と大きさ
+// だけだと「A の中の (324,24)」と「S の中の (324,24)」が同じ印になる。
+// 真上へ1行ぶんドラッグした付箋が自分の書き込みの反響と区別できなくなり、
+// 人が動かしたのに整列が走らない。
 function stamp(node: SceneNode): string {
-  return `${node.x}:${node.y}:${node.width}:${node.height}`;
+  const parentId = node.parent !== null ? node.parent.id : '';
+  return `${parentId}:${node.x}:${node.y}:${node.width}:${node.height}`;
 }
 
 function remember(node: SceneNode): void {
