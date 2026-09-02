@@ -140,7 +140,7 @@ test('行を削除すると中の付箋は盤面の外へ逃げ、隙間は詰�
   await h.send({ type: 'delete-row', id: row.id });
 
   assert.equal(h.rows().length, 4);
-  assert.equal(sticky.removed, undefined, '付箋は消えていない');
+  assert.equal(sticky.removed, false, '付箋は消えていない');
   assert.equal(sticky.parent.type, 'PAGE', 'どの行にも盤面にも取り込まれていない');
   assert.ok(h.absolute(sticky).y >= boardBottom, '盤面より下にいる');
 

@@ -66,3 +66,21 @@ test('スタイルの変更（node を持たない）が混ざっても落ちな
   await h.flush();
   assert.deepEqual(h.items(row).map((n) => n.x), [324], 'あとの整列も生きている');
 });
+
+test('生きているノードを「消えたノード」と誤判定しない', async () => {
+  const h = createHarness();
+  await h.send({ type: 'create-board' });
+  await h.flush();
+  const row = h.rows()[0];
+  const sticky = h.dropIn(row, 'あ', CONTENT_X + 900, 40);
+
+  // 実物の BaseNodeMixin は removed を必ず持つ（生きていれば false）。
+  // プロパティの有無で判定すると、この付箋が消えた扱いになって的から外れる。
+  assert.equal('removed' in sticky, true, '生きていても removed プロパティはある');
+  assert.equal(sticky.removed, false);
+
+  h.change(sticky);
+  await h.flush();
+
+  assert.equal(sticky.x, CONTENT_X, '的に入って整列される');
+});

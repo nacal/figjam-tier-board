@@ -151,7 +151,7 @@ test('行を消したときの逃がし先が、下にある別の盤面に刺�
 
   await h.send({ type: 'delete-row', id: row.id });
 
-  assert.equal(sticky.removed, undefined);
+  assert.equal(sticky.removed, false);
   assert.equal(sticky.parent.type, 'PAGE', '下の盤面に取り込まれていない');
   assert.ok(h.absolute(sticky).y >= lowerBottom, '２つ目の盤面より下にいる');
 });
