@@ -12,6 +12,7 @@
 const TIER_FLAG_KEY = 'figjamTierRow';
 const TIER_COLOR_KEY = 'figjamTierColor';
 const TIER_WIDTH_KEY = 'figjamTierWidth';
+const TIER_BOARD_KEY = 'figjamTierBoard';
 const TIER_LABEL_KEY = 'figjamTierLabel';
 const AUTO_ARRANGE_KEY = 'autoArrange';
 
@@ -67,6 +68,7 @@ const COLOR_PRESETS: ColorPreset[] = [
 const FALLBACK_COLOR_KEY = 'gray';
 
 let autoArrange = true;
+let activeBoardId: string | null = null;
 let arrangeTimer: number | null = null;
 let suppressUntil = 0;
 
@@ -113,6 +115,81 @@ function getRows(): SectionNode[] {
   }
   rows.sort((a, b) => a.y - b.y);
   return rows;
+}
+
+interface Board {
+  id: string;
+  rows: SectionNode[];
+}
+
+function newBoardId(): string {
+  return `b${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
+}
+
+// ページ上のティア行を盤面ごとにまとめる。行はどれも盤面 ID を plugin data で
+// 持っていて、それが同じものがひとつの盤面。並びは、いちばん上の行が上にある
+// 盤面から。
+function getBoards(): Board[] {
+  const rows = getRows();
+
+  // 盤面 ID を持たない行は、複数盤面に対応する前に作られたもの。当時は
+  // ページにひとつしか作れなかったので、まとめてひとつの盤面として扱う。
+  const legacy: SectionNode[] = [];
+  for (const row of rows) {
+    if (row.getPluginData(TIER_BOARD_KEY) === '') {
+      legacy.push(row);
+    }
+  }
+  if (legacy.length > 0) {
+    const id = newBoardId();
+    for (const row of legacy) {
+      row.setPluginData(TIER_BOARD_KEY, id);
+    }
+  }
+
+  const grouped: { [id: string]: SectionNode[] } = {};
+  const order: string[] = [];
+  for (const row of rows) {
+    const id = row.getPluginData(TIER_BOARD_KEY);
+    if (grouped[id] === undefined) {
+      grouped[id] = [];
+      order.push(id);
+    }
+    grouped[id].push(row);
+  }
+  return order.map((id) => ({ id, rows: grouped[id] }));
+}
+
+function findBoard(boards: Board[], id: string | null): Board | null {
+  if (id === null) {
+    return null;
+  }
+  for (const board of boards) {
+    if (board.id === id) {
+      return board;
+    }
+  }
+  return null;
+}
+
+// パネルが操作している盤面。指定が無い／消えていたら、いちばん上の盤面。
+function activeBoard(boards: Board[]): Board | null {
+  const found = findBoard(boards, activeBoardId);
+  if (found !== null) {
+    return found;
+  }
+  return boards.length > 0 ? boards[0] : null;
+}
+
+function boardOfRow(boards: Board[], rowId: string): Board | null {
+  for (const board of boards) {
+    for (const row of board.rows) {
+      if (row.id === rowId) {
+        return board;
+      }
+    }
+  }
+  return null;
 }
 
 function findLabel(row: SectionNode): ShapeWithTextNode | null {
@@ -193,10 +270,17 @@ function applyColor(row: SectionNode, key: string): void {
   }
 }
 
-async function createRow(name: string, colorKey: string, x: number, y: number): Promise<SectionNode> {
+async function createRow(
+  boardId: string,
+  name: string,
+  colorKey: string,
+  x: number,
+  y: number,
+): Promise<SectionNode> {
   const row = figma.createSection();
   row.name = name;
   row.setPluginData(TIER_FLAG_KEY, '1');
+  row.setPluginData(TIER_BOARD_KEY, boardId);
   row.setPluginData(TIER_COLOR_KEY, colorKey);
   row.resizeWithoutConstraints(ROW_WIDTH, ROW_HEIGHT);
   row.x = x;
@@ -327,13 +411,16 @@ async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> 
   row.setPluginData(TIER_WIDTH_KEY, String(targetWidth));
 }
 
+// 盤面ごとに幅を決めて整列し、その盤面のなかだけで詰め直す。
+// 幅も並びも盤面をまたがない。
 async function arrangeAll(): Promise<void> {
-  const rows = getRows();
-  const width = boardWidth(rows);
-  for (const row of rows) {
-    await arrangeRow(row, width);
+  for (const board of getBoards()) {
+    const width = boardWidth(board.rows);
+    for (const row of board.rows) {
+      await arrangeRow(row, width);
+    }
+    relayout(board.rows);
   }
-  relayout(rows);
 }
 
 async function runArrange(): Promise<void> {
@@ -354,13 +441,27 @@ function scheduleArrange(): void {
 }
 
 function postRows(): void {
-  const rows = getRows().map((row) => ({
+  const boards = getBoards();
+  const active = activeBoard(boards);
+  activeBoardId = active !== null ? active.id : null;
+  const rows = (active !== null ? active.rows : []).map((row) => ({
     id: row.id,
     name: row.name,
     color: row.getPluginData(TIER_COLOR_KEY) || FALLBACK_COLOR_KEY,
     count: itemsOf(row).length,
   }));
-  figma.ui.postMessage({ type: 'rows', rows, presets: COLOR_PRESETS, autoArrange });
+  figma.ui.postMessage({
+    type: 'rows',
+    boards: boards.map((board, index) => ({
+      id: board.id,
+      label: `盤面 ${index + 1}`,
+      rowCount: board.rows.length,
+    })),
+    activeBoardId,
+    rows,
+    presets: COLOR_PRESETS,
+    autoArrange,
+  });
 }
 
 async function getRowById(id: string): Promise<SectionNode | null> {
@@ -391,19 +492,20 @@ function boardOrigin(totalHeight: number): { x: number; y: number } {
   return { x: Math.round(minX), y: Math.round(maxY + BOARD_MARGIN) };
 }
 
+// 盤面はいくつでも作れる。新しい盤面は既存のコンテンツの下に置く。
 async function createBoard(): Promise<void> {
-  if (getRows().length > 0) {
-    figma.notify('このページには既に Tier 表があります');
-    return;
-  }
   const totalHeight = DEFAULT_TIERS.length * ROW_HEIGHT + (DEFAULT_TIERS.length - 1) * ROW_GAP;
   const origin = boardOrigin(totalHeight);
+  const boardId = newBoardId();
 
   const created: SectionNode[] = [];
   for (let i = 0; i < DEFAULT_TIERS.length; i++) {
     const tier = DEFAULT_TIERS[i];
-    created.push(await createRow(tier.name, tier.color, origin.x, origin.y + i * (ROW_HEIGHT + ROW_GAP)));
+    created.push(
+      await createRow(boardId, tier.name, tier.color, origin.x, origin.y + i * (ROW_HEIGHT + ROW_GAP)),
+    );
   }
+  activeBoardId = boardId;
   figma.viewport.scrollAndZoomIntoView(created);
 }
 
@@ -422,19 +524,34 @@ function nextRowName(rows: SectionNode[]): string {
 }
 
 async function addRow(): Promise<void> {
-  const rows = getRows();
-  if (rows.length === 0) {
+  const board = activeBoard(getBoards());
+  if (board === null) {
     await createBoard();
     return;
   }
-  const last = rows[rows.length - 1];
-  const row = await createRow(nextRowName(rows), FALLBACK_COLOR_KEY, last.x, last.y + last.height + ROW_GAP);
-  row.resizeWithoutConstraints(boardWidth(rows), ROW_HEIGHT);
+  const last = board.rows[board.rows.length - 1];
+  const row = await createRow(
+    board.id,
+    nextRowName(board.rows),
+    FALLBACK_COLOR_KEY,
+    last.x,
+    last.y + last.height + ROW_GAP,
+  );
+  row.resizeWithoutConstraints(boardWidth(board.rows), ROW_HEIGHT);
   figma.viewport.scrollAndZoomIntoView([row]);
 }
 
-// セクションを消すと中の子ごと消えるため、先に中身を盤面の下へ逃がす。
-// その場に残すと、隙間を詰めた行がそれを踏んで自動的に子にしてしまう。
+// 逃がし先はページの全コンテンツの下。盤面の真下だと、その位置に別の盤面が
+// あったときに逃がした付箋をそのまま取り込んでしまう。
+function rescueDropY(): number {
+  let bottom = -Infinity;
+  for (const node of figma.currentPage.children) {
+    bottom = Math.max(bottom, node.y + node.height);
+  }
+  return (isFinite(bottom) ? bottom : 0) + RESCUE_MARGIN;
+}
+
+// セクションを消すと中の子ごと消えるため、先に中身を外へ逃がす。
 function rescueItems(row: SectionNode, dropY: number): number {
   const destination = row.parent !== null ? row.parent : figma.currentPage;
   const items = itemsOf(row);
@@ -452,16 +569,13 @@ async function deleteRow(id: string): Promise<void> {
   if (row === null) {
     return;
   }
-  const rows = getRows();
-  let bottom = row.y + row.height;
-  for (const other of rows) {
-    bottom = Math.max(bottom, other.y + other.height);
-  }
-  const rescued = rescueItems(row, bottom + RESCUE_MARGIN);
+  const board = boardOfRow(getBoards(), id);
+  const siblings = board !== null ? board.rows : [row];
+  const rescued = rescueItems(row, rescueDropY());
   row.remove();
-  relayout(getRows());
+  relayout(siblings.filter((candidate) => candidate.id !== id));
   if (rescued > 0) {
-    figma.notify(`${rescued} 個のアイテムを盤面の下に移しました`);
+    figma.notify(`${rescued} 個のアイテムをキャンバスの下に移しました`);
   }
 }
 
@@ -488,9 +602,13 @@ async function setRowColor(id: string, colorKey: string): Promise<void> {
   applyColor(row, colorKey);
 }
 
-// 配列上で順序を入れ替えたあと、全行の y を詰め直す。
+// 配列上で順序を入れ替えたあと、その盤面の行の y を詰め直す。
 async function moveRow(id: string, direction: 'up' | 'down'): Promise<void> {
-  const rows = getRows();
+  const board = boardOfRow(getBoards(), id);
+  if (board === null) {
+    return;
+  }
+  const rows = board.rows;
   const index = rows.findIndex((row) => row.id === id);
   if (index < 0) {
     return;
@@ -505,11 +623,18 @@ async function moveRow(id: string, direction: 'up' | 'down'): Promise<void> {
   relayout(rows);
 }
 
-// パネル上でドラッグ&ドロップされた順序をそのまま反映する。パネルが把握して
-// いない行がページにあってもいいように、渡された ID の順に並べ、残りは
-// 現在の順序のまま後ろへ回す。
+// パネル上でドラッグ&ドロップされた順序をそのまま反映する。対象は渡された
+// 行が属する盤面だけ。パネルが把握していない行がその盤面にあってもいいように、
+// 渡された ID の順に並べ、残りは現在の順序のまま後ろへ回す。
 function reorderRows(ids: string[]): void {
-  const rows = getRows();
+  if (ids.length === 0) {
+    return;
+  }
+  const board = boardOfRow(getBoards(), ids[0]);
+  if (board === null) {
+    return;
+  }
+  const rows = board.rows;
   const ordered: SectionNode[] = [];
   for (const id of ids) {
     const row = rows.find((candidate) => candidate.id === id);
@@ -541,6 +666,7 @@ interface UiMessage {
   color?: string;
   direction?: 'up' | 'down';
   enabled?: boolean;
+  boardId?: string;
 }
 
 figma.showUI(__html__, { width: 340, height: 520, themeColors: true });
@@ -570,6 +696,9 @@ figma.ui.onmessage = async (message: UiMessage) => {
     case 'reorder-rows':
       reorderRows(message.ids as string[]);
       break;
+    case 'select-board':
+      activeBoardId = message.boardId as string;
+      break;
     case 'arrange-now':
       await runArrange();
       return;
@@ -596,6 +725,30 @@ figma.currentPage.on('nodechange', (event: NodeChangeEvent) => {
       scheduleArrange();
       return;
     }
+  }
+});
+
+// キャンバスで盤面の中の何かを選んだら、パネルの操作対象をその盤面に移す。
+// 盤面が複数あるとき、いちいちセレクタを触らずに済む。
+function boardIdFromSelection(): string | null {
+  for (const node of figma.currentPage.selection) {
+    let cursor: BaseNode | null = node;
+    while (cursor !== null) {
+      if (isTierRow(cursor)) {
+        const id = cursor.getPluginData(TIER_BOARD_KEY);
+        return id === '' ? null : id;
+      }
+      cursor = cursor.parent;
+    }
+  }
+  return null;
+}
+
+figma.on('selectionchange', () => {
+  const id = boardIdFromSelection();
+  if (id !== null && id !== activeBoardId) {
+    activeBoardId = id;
+    postRows();
   }
 });
 
