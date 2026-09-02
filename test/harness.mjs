@@ -47,6 +47,7 @@ export function createHarness() {
     parent: null,
     x: 0,
     y: 0,
+    selection: [],
     listeners: [],
     on(type, callback) {
       this.listeners.push({ type, callback });
@@ -132,8 +133,13 @@ export function createHarness() {
 
   const storage = new Map();
 
+  const globalListeners = [];
+
   const figma = {
     currentPage: page,
+    on(type, callback) {
+      globalListeners.push({ type, callback });
+    },
     root: { children: [page] },
     viewport: {
       center: { x: 0, y: 0 },
@@ -231,6 +237,23 @@ export function createHarness() {
     settle();
   }
 
+  // キャンバスでの選択を再現する。パネルの操作対象がこれに追従する。
+  function select(nodes) {
+    page.selection = Array.isArray(nodes) ? nodes : [nodes];
+    for (const listener of globalListeners) {
+      if (listener.type === 'selectionchange') {
+        listener.callback();
+      }
+    }
+  }
+
+  // vm 側で作られたオブジェクトはプロトタイプがテスト側と違い、deepEqual が
+  // 素通りしない。素の値に写して返す。
+  function lastUiMessage() {
+    const message = uiMessages[uiMessages.length - 1];
+    return message === undefined ? undefined : JSON.parse(JSON.stringify(message));
+  }
+
   function items(row) {
     return row.children.filter((child) => child.getPluginData?.('figjamTierLabel') !== '1');
   }
@@ -246,5 +269,19 @@ export function createHarness() {
       .sort((a, b) => a.y - b.y);
   }
 
-  return { figma, page, send, rows, items, label, createSticky, settle, notifications, uiMessages, absolute };
+  return {
+    figma,
+    page,
+    send,
+    select,
+    rows,
+    items,
+    label,
+    createSticky,
+    settle,
+    notifications,
+    uiMessages,
+    lastUiMessage,
+    absolute,
+  };
 }
