@@ -89,6 +89,8 @@ let pendingAll = false;
 // 出ていった先の情報だけでは元の行が分からないので覚えておく。
 // 消えた付箋のぶんだけメモリに持つ。生きている付箋は plugin data 側が正。
 let itemHome: { [nodeId: string]: string } = {};
+// キャンバスの変更をどの経路で購読できたか。パネルに出して切り分けに使う。
+let subscriptions: string[] = [];
 // 整列が最後に書き込んだ位置と大きさ。整列そのものが nodechange を起こすので、
 // その反響と人の操作を見分けるために使う。時間で無視する窓にすると、整列の
 // 直後に動かした付箋がまるごと取りこぼされる。
@@ -813,6 +815,7 @@ function postRows(): void {
     rows,
     presets: COLOR_PRESETS,
     autoArrange,
+    subscriptions,
   });
 }
 
@@ -1116,13 +1119,16 @@ figma.ui.onmessage = async (message: UiMessage) => {
 
 // キャンバス側の操作を拾って整列する。REMOTE（他の参加者の操作）に反応すると
 // 全員が同じ行を奪い合って動かし続けるので、自分の操作だけを見る。
-function handleNodeChange(event: NodeChangeEvent): void {
+//
+// 変更は node を持つものだけを見る。documentchange にはスタイルの変更も
+// 混ざってきて、そちらには node が無い。
+function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): void {
   if (!autoArrange) {
     return;
   }
   let marked = false;
-  for (const change of event.nodeChanges) {
-    if (change.origin !== 'LOCAL') {
+  for (const change of changes) {
+    if (change.origin !== 'LOCAL' || !('node' in change)) {
       continue;
     }
     const live = liveNode(change.node);
@@ -1171,6 +1177,27 @@ function handleNodeChange(event: NodeChangeEvent): void {
   }
 }
 
+// 経路はひとつに賭けない。片方が黙って何も届けなくても整列が止まらないように
+// 両方張る。二重に届いても、的は重複を除くしデバウンスでまとめられる。
+function subscribeToCanvas(): void {
+  try {
+    figma.currentPage.on('nodechange', (event: NodeChangeEvent) => {
+      handleChanges(event.nodeChanges);
+    });
+    subscriptions.push('nodechange');
+  } catch (error) {
+    subscriptions.push(`nodechange失敗(${String(error)})`);
+  }
+  try {
+    figma.on('documentchange', (event: DocumentChangeEvent) => {
+      handleChanges(event.documentChanges);
+    });
+    subscriptions.push('documentchange');
+  } catch (error) {
+    subscriptions.push(`documentchange失敗(${String(error)})`);
+  }
+}
+
 // キャンバスで盤面の中の何かを選んだら、パネルの操作対象をその盤面に移す。
 // 盤面が複数あるとき、いちいちセレクタを触らずに済む。
 function boardIdFromSelection(): string | null {
@@ -1197,7 +1224,7 @@ figma.on('selectionchange', () => {
 
 // 購読は同期で張る。読み込みを待ってから張ると、待っているあいだの操作を
 // 取りこぼす。
-figma.currentPage.on('nodechange', handleNodeChange);
+subscribeToCanvas();
 
 (async () => {
   const stored = await figma.clientStorage.getAsync(AUTO_ARRANGE_KEY);
