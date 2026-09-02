@@ -17,6 +17,8 @@ const TIER_BOARD_NAME_KEY = 'figjamTierBoardName';
 const TIER_TITLE_KEY = 'figjamTierTitle';
 // 盤面をまるごと包むセクション。これを掴めば表ごと動かせる。
 const BOARD_FLAG_KEY = 'figjamTierBoardSection';
+// 付箋が最後にいた行。行から出ていった付箋の元の行を知るために使う。
+const ITEM_HOME_KEY = 'figjamTierHome';
 const TIER_LABEL_KEY = 'figjamTierLabel';
 const AUTO_ARRANGE_KEY = 'autoArrange';
 
@@ -85,6 +87,7 @@ let pendingRowIds: string[] = [];
 let pendingAll = false;
 // 前回の整列時点で、どの付箋がどの行にいたか。付箋が行から出ていったとき、
 // 出ていった先の情報だけでは元の行が分からないので覚えておく。
+// 消えた付箋のぶんだけメモリに持つ。生きている付箋は plugin data 側が正。
 let itemHome: { [nodeId: string]: string } = {};
 // 整列が最後に書き込んだ位置と大きさ。整列そのものが nodechange を起こすので、
 // その反響と人の操作を見分けるために使う。時間で無視する窓にすると、整列の
@@ -633,7 +636,12 @@ async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> 
       item.x = cursorX;
       item.y = cursorY;
       cursorX += item.width + ITEM_GAP;
+      // 所属はノード自身にも書く。メモリだけに持つと、プラグインを開き直した
+      // 直後に「付箋が出ていった元の行」が分からず、穴が詰まらない。
       itemHome[item.id] = row.id;
+      if (item.getPluginData(ITEM_HOME_KEY) !== row.id) {
+        item.setPluginData(ITEM_HOME_KEY, row.id);
+      }
       remember(item);
     }
     cursorY += lineHeights[i] + ITEM_GAP;
@@ -689,6 +697,14 @@ async function runArrange(): Promise<void> {
 // だけだと「A の中の (324,24)」と「S の中の (324,24)」が同じ印になる。
 // 真上へ1行ぶんドラッグした付箋が自分の書き込みの反響と区別できなくなり、
 // 人が動かしたのに整列が走らない。
+// 消えたノードは RemovedNode で届く。生きているノードだけを取り出す。
+function liveNode(node: SceneNode | RemovedNode): SceneNode | null {
+  if ('removed' in node) {
+    return null;
+  }
+  return node;
+}
+
 function stamp(node: SceneNode): string {
   const parentId = node.parent !== null ? node.parent.id : '';
   return `${parentId}:${node.x}:${node.y}:${node.width}:${node.height}`;
@@ -1051,7 +1067,7 @@ figma.ui.onmessage = async (message: UiMessage) => {
 
 // キャンバス側の操作を拾って整列する。REMOTE（他の参加者の操作）に反応すると
 // 全員が同じ行を奪い合って動かし続けるので、自分の操作だけを見る。
-figma.currentPage.on('nodechange', (event: NodeChangeEvent) => {
+function handleNodeChange(event: NodeChangeEvent): void {
   if (!autoArrange) {
     return;
   }
@@ -1060,31 +1076,48 @@ figma.currentPage.on('nodechange', (event: NodeChangeEvent) => {
     if (change.origin !== 'LOCAL') {
       continue;
     }
-    const node = change.node;
-    const alive = !('removed' in node);
-    // 整列が書いた位置と大きさのままなら、それは自分の書き込みの反響。
-    if (alive && written[change.id] === stamp(node)) {
+    const live = liveNode(change.node);
+
+    // 整列が書いた親・位置・大きさのままなら、それは自分の書き込みの反響。
+    if (live !== null && written[change.id] === stamp(live)) {
       continue;
     }
+
     // 出ていった先だけでは元の行が分からないので、前回いた行も的に入れる。
     // これが無いと、付箋を行の外へ出したあと元の行に穴が残る。
-    const previous = itemHome[change.id];
-    if (previous !== undefined) {
+    let previous = live !== null ? live.getPluginData(ITEM_HOME_KEY) : '';
+    if (previous === '') {
+      const remembered = itemHome[change.id];
+      previous = remembered !== undefined ? remembered : '';
+    }
+    if (previous !== '') {
       markRow(previous);
       marked = true;
     }
-    if (alive) {
-      const current = rowIdOf(node);
-      if (current !== null) {
-        markRow(current);
-        marked = true;
+
+    const current = live !== null ? rowIdOf(live) : null;
+    if (current !== null) {
+      markRow(current);
+      marked = true;
+    }
+
+    // 親が変わったのに元の行が分からない付箋（まだ一度も整列していない）は、
+    // どこかの行に穴を空けている。行き先の盤面をまとめて対象にする。
+    if (previous === '' && current !== null && change.type === 'PROPERTY_CHANGE') {
+      if (change.properties.indexOf('parent') >= 0) {
+        const board = boardOfRow(getBoards(), current);
+        if (board !== null) {
+          for (const row of board.rows) {
+            markRow(row.id);
+          }
+        }
       }
     }
   }
   if (marked) {
     scheduleArrange();
   }
-});
+}
 
 // キャンバスで盤面の中の何かを選んだら、パネルの操作対象をその盤面に移す。
 // 盤面が複数あるとき、いちいちセレクタを触らずに済む。
@@ -1109,6 +1142,10 @@ figma.on('selectionchange', () => {
     postRows();
   }
 });
+
+// 購読は同期で張る。読み込みを待ってから張ると、待っているあいだの操作を
+// 取りこぼす。
+figma.currentPage.on('nodechange', handleNodeChange);
 
 (async () => {
   const stored = await figma.clientStorage.getAsync(AUTO_ARRANGE_KEY);
