@@ -131,6 +131,51 @@ export function createHarness() {
     };
   }
 
+  function createText() {
+    const text = {
+      type: 'TEXT',
+      id: nextId(),
+      name: 'Text',
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      parent: null,
+      pluginData: {},
+      fontName: { family: 'Inter', style: 'Medium' },
+      _characters: '',
+      _fontSize: 12,
+      get characters() {
+        return this._characters;
+      },
+      set characters(value) {
+        this._characters = value;
+        this.width = value.length * this._fontSize * 0.6;
+        this.height = this._fontSize * 1.2;
+      },
+      get fontSize() {
+        return this._fontSize;
+      },
+      set fontSize(value) {
+        this._fontSize = value;
+        this.width = this._characters.length * value * 0.6;
+        this.height = value * 1.2;
+      },
+      getPluginData(key) {
+        return this.pluginData[key] ?? '';
+      },
+      setPluginData(key, value) {
+        this.pluginData[key] = value;
+      },
+      remove() {
+        this.removed = true;
+        detach(this);
+      },
+    };
+    page.appendChild(text);
+    return text;
+  }
+
   const storage = new Map();
 
   const globalListeners = [];
@@ -165,6 +210,7 @@ export function createHarness() {
     },
     createSection,
     createShapeWithText,
+    createText,
     async loadFontAsync() {},
     async getNodeByIdAsync(id) {
       const walk = (nodes) => {
@@ -237,6 +283,30 @@ export function createHarness() {
     settle();
   }
 
+  // キャンバス側でノードが変わったことを通知する。プラグインはこれを拾って
+  // デバウンス付きで整列するので、待つときは flush を使う。
+  function change(nodes) {
+    const list = Array.isArray(nodes) ? nodes : [nodes];
+    for (const listener of page.listeners) {
+      if (listener.type !== 'nodechange') continue;
+      listener.callback({
+        nodeChanges: list.map((node) => ({
+          type: 'PROPERTY_CHANGE',
+          id: node.id,
+          origin: 'LOCAL',
+          node,
+          properties: ['x'],
+        })),
+      });
+    }
+  }
+
+  // デバウンスと抑制窓を越えるまで待ってから、セクションの取り込みを反映する。
+  async function flush(ms = 500) {
+    await new Promise((resolve) => setTimeout(resolve, ms));
+    settle();
+  }
+
   // キャンバスでの選択を再現する。パネルの操作対象がこれに追従する。
   function select(nodes) {
     page.selection = Array.isArray(nodes) ? nodes : [nodes];
@@ -273,6 +343,8 @@ export function createHarness() {
     figma,
     page,
     send,
+    change,
+    flush,
     select,
     rows,
     items,
