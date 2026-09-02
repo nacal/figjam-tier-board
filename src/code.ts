@@ -15,6 +15,8 @@ const TIER_WIDTH_KEY = 'figjamTierWidth';
 const TIER_BOARD_KEY = 'figjamTierBoard';
 const TIER_BOARD_NAME_KEY = 'figjamTierBoardName';
 const TIER_TITLE_KEY = 'figjamTierTitle';
+// 盤面をまるごと包むセクション。これを掴めば表ごと動かせる。
+const BOARD_FLAG_KEY = 'figjamTierBoardSection';
 const TIER_LABEL_KEY = 'figjamTierLabel';
 const AUTO_ARRANGE_KEY = 'autoArrange';
 
@@ -41,6 +43,8 @@ const TITLE_GAP = 32;
 
 const CONTENT_FILL: RGB = { r: 0.106, g: 0.106, b: 0.106 };
 const BORDER_STROKE: RGB = { r: 0.24, g: 0.24, b: 0.24 };
+// 見出しは暗い面の上に乗るので、既定の濃い文字色のままだと読めない。
+const TITLE_FILL: RGB = { r: 0.95, g: 0.95, b: 0.95 };
 
 // ドラッグ中に整列が割り込むと掴んでいる付箋が飛ぶので、変更が落ち着いてから走らせる。
 const ARRANGE_DEBOUNCE_MS = 320;
@@ -118,22 +122,30 @@ function isTierLabel(node: SceneNode): node is ShapeWithTextNode {
   return node.type === 'SHAPE_WITH_TEXT' && node.getPluginData(TIER_LABEL_KEY) === '1';
 }
 
-// ページ上のティア行を y の昇順で読む。プラグインが付けたフラグを持つ
-// セクションだけを対象にするので、無関係なセクションは巻き込まない。
-function getRows(): SectionNode[] {
-  const sections = figma.currentPage.findAllWithCriteria({ types: ['SECTION'] });
-  const rows: SectionNode[] = [];
-  for (const section of sections) {
-    if (isTierRow(section)) {
-      rows.push(section);
-    }
+function isBoardContainer(node: BaseNode): node is SectionNode {
+  return node.type === 'SECTION' && node.getPluginData(BOARD_FLAG_KEY) === '1';
+}
+
+function allSections(): SectionNode[] {
+  return figma.currentPage.findAllWithCriteria({ types: ['SECTION'] });
+}
+
+// ページ座標。盤面のセクションの中にいる行や付箋は、親からの相対で持っている。
+function pagePosition(node: SceneNode): { x: number; y: number } {
+  let x = node.x;
+  let y = node.y;
+  let parent: BaseNode | null = node.parent;
+  while (parent !== null && parent.type === 'SECTION') {
+    x += parent.x;
+    y += parent.y;
+    parent = parent.parent;
   }
-  rows.sort((a, b) => a.y - b.y);
-  return rows;
+  return { x, y };
 }
 
 interface Board {
   id: string;
+  container: SectionNode;
   rows: SectionNode[];
 }
 
@@ -141,38 +153,107 @@ function newBoardId(): string {
   return `b${Date.now().toString(36)}${Math.floor(Math.random() * 1e6).toString(36)}`;
 }
 
-// ページ上のティア行を盤面ごとにまとめる。行はどれも盤面 ID を plugin data で
-// 持っていて、それが同じものがひとつの盤面。並びは、いちばん上の行が上にある
-// 盤面から。
-function getBoards(): Board[] {
-  const rows = getRows();
+function makeContainer(id: string, x: number, y: number, width: number, height: number): SectionNode {
+  const container = figma.createSection();
+  container.setPluginData(BOARD_FLAG_KEY, '1');
+  container.setPluginData(TIER_BOARD_KEY, id);
+  container.name = 'Tier表';
+  container.resizeWithoutConstraints(Math.max(width, 1), Math.max(height, 1));
+  container.x = x;
+  container.y = y;
+  container.fills = [{ type: 'SOLID', color: CONTENT_FILL }];
+  figma.currentPage.appendChild(container);
+  return container;
+}
 
-  // 盤面 ID を持たない行は、複数盤面に対応する前に作られたもの。当時は
-  // ページにひとつしか作れなかったので、まとめてひとつの盤面として扱う。
-  const legacy: SectionNode[] = [];
-  for (const row of rows) {
-    if (row.getPluginData(TIER_BOARD_KEY) === '') {
-      legacy.push(row);
+// 盤面のセクションに入っていないティア行を拾って、包み直す。盤面を包む前に
+// 作られた盤面も、これで表ごと動かせるようになる。
+function wrapLooseRows(): void {
+  const loose: SectionNode[] = [];
+  for (const section of allSections()) {
+    if (isTierRow(section) && (section.parent === null || !isBoardContainer(section.parent))) {
+      loose.push(section);
     }
   }
-  if (legacy.length > 0) {
-    const id = newBoardId();
-    for (const row of legacy) {
-      row.setPluginData(TIER_BOARD_KEY, id);
-    }
+  if (loose.length === 0) {
+    return;
   }
 
   const grouped: { [id: string]: SectionNode[] } = {};
   const order: string[] = [];
-  for (const row of rows) {
-    const id = row.getPluginData(TIER_BOARD_KEY);
+  // 盤面 ID を持たない行は、複数盤面に対応する前に作られたもの。当時は
+  // ページにひとつしか作れなかったので、まとめてひとつの盤面として扱う。
+  let legacyId = '';
+  for (const row of loose) {
+    let id = row.getPluginData(TIER_BOARD_KEY);
+    if (id === '') {
+      if (legacyId === '') {
+        legacyId = newBoardId();
+      }
+      id = legacyId;
+      row.setPluginData(TIER_BOARD_KEY, id);
+    }
     if (grouped[id] === undefined) {
       grouped[id] = [];
       order.push(id);
     }
     grouped[id].push(row);
   }
-  return order.map((id) => ({ id, rows: grouped[id] }));
+
+  for (const id of order) {
+    const rows = grouped[id];
+    rows.sort((a, b) => pagePosition(a).y - pagePosition(b).y);
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const row of rows) {
+      const pos = pagePosition(row);
+      minX = Math.min(minX, pos.x);
+      minY = Math.min(minY, pos.y);
+      maxX = Math.max(maxX, pos.x + row.width);
+      maxY = Math.max(maxY, pos.y + row.height);
+    }
+
+    const container = makeContainer(id, minX, minY, maxX - minX, maxY - minY);
+    for (const row of rows) {
+      const pos = pagePosition(row);
+      container.appendChild(row);
+      row.x = pos.x - container.x;
+      row.y = pos.y - container.y;
+    }
+    // 盤面の見出しも一緒に動くよう、中へ入れる
+    for (const node of figma.currentPage.children.slice()) {
+      if (node.type === 'TEXT' && node.getPluginData(TIER_TITLE_KEY) === id) {
+        container.appendChild(node);
+        node.x = 0;
+        node.y = 0;
+      }
+    }
+  }
+}
+
+// 盤面ごとのまとまり。並びは、上にある盤面から。
+function getBoards(): Board[] {
+  wrapLooseRows();
+  const containers: SectionNode[] = [];
+  for (const section of allSections()) {
+    if (isBoardContainer(section)) {
+      containers.push(section);
+    }
+  }
+  containers.sort((a, b) => pagePosition(a).y - pagePosition(b).y);
+  return containers.map((container) => {
+    const rows: SectionNode[] = [];
+    for (const child of container.children) {
+      if (isTierRow(child)) {
+        rows.push(child);
+      }
+    }
+    rows.sort((a, b) => a.y - b.y);
+    return { id: container.getPluginData(TIER_BOARD_KEY), container, rows };
+  });
 }
 
 function boardName(board: Board): string {
@@ -186,38 +267,15 @@ function boardName(board: Board): string {
 }
 
 // 盤面の名前はキャンバス上にも見出しとして出す。パネルの中だけに持っていても
-// 一緒に見ている人には見えないため。名前が空のときは見出しを置かない。
-function findTitle(boardId: string): TextNode | null {
-  for (const node of figma.currentPage.children) {
-    if (node.type === 'TEXT' && node.getPluginData(TIER_TITLE_KEY) === boardId) {
-      return node;
+// 一緒に見ている人には見えないため。見出しは盤面のセクションの子にしてあるので
+// 表ごと動かせば一緒に動く。名前が空のときは見出しを置かない。
+function findTitle(container: SectionNode): TextNode | null {
+  for (const child of container.children) {
+    if (child.type === 'TEXT' && child.getPluginData(TIER_TITLE_KEY) === '1') {
+      return child;
     }
   }
   return null;
-}
-
-function topRow(rows: SectionNode[]): SectionNode {
-  let top = rows[0];
-  for (const row of rows) {
-    if (row.y < top.y) {
-      top = row;
-    }
-  }
-  return top;
-}
-
-function positionTitle(rows: SectionNode[]): void {
-  if (rows.length === 0) {
-    return;
-  }
-  const title = findTitle(rows[0].getPluginData(TIER_BOARD_KEY));
-  if (title === null) {
-    return;
-  }
-  const top = topRow(rows);
-  title.x = top.x;
-  title.y = top.y - TITLE_GAP - title.height;
-  remember(title);
 }
 
 function findBoard(boards: Board[], id: string | null): Board | null {
@@ -331,47 +389,74 @@ function applyColor(row: SectionNode, key: string): void {
 }
 
 async function createRow(
-  boardId: string,
+  container: SectionNode,
   name: string,
   colorKey: string,
-  x: number,
   y: number,
 ): Promise<SectionNode> {
+  const boardId = container.getPluginData(TIER_BOARD_KEY);
   const row = figma.createSection();
   row.name = name;
   row.setPluginData(TIER_FLAG_KEY, '1');
   row.setPluginData(TIER_BOARD_KEY, boardId);
   row.setPluginData(TIER_COLOR_KEY, colorKey);
   row.resizeWithoutConstraints(ROW_WIDTH, ROW_HEIGHT);
-  row.x = x;
-  row.y = y;
   applyRowChrome(row);
-  figma.currentPage.appendChild(row);
+  container.appendChild(row);
+  row.x = 0;
+  row.y = y;
   await ensureLabel(row);
   return row;
 }
 
-// 与えられた順序で全行の y を上から詰め直す。行の高さは整列やユーザー操作で
-// 変わっているので、実際の高さを積み上げて配置する。
+// 与えられた順序で、盤面のセクションの中に上から詰め直す。行の高さは整列や
+// ユーザー操作で変わっているので、実際の高さを積み上げて配置する。
 //
-// 基準は「今いちばん上にある行の左上」であって、新しい順序の先頭に来た行が
-// 今いる場所ではない。後者を基準にすると、並べ替えのたびに盤面ごとその行の
-// 位置へ飛んでいく。全行の最小 x でもないのは、誰かが1行だけ横へずらした
-// ときに盤面全体がそちらへ引っ張られてしまうため。
-function relayout(rows: SectionNode[]): void {
-  if (rows.length === 0) {
-    return;
-  }
-  const top = topRow(rows);
-  const anchorX = top.x;
-  let cursorY = top.y;
+// 位置はすべて盤面のセクションからの相対。盤面そのものの場所には触らないので、
+// 並べ替えても表は動かないし、ユーザーが表を掴んで動かした場所も保たれる。
+function relayout(container: SectionNode, rows: SectionNode[]): void {
+  const title = findTitle(container);
+  const titleBlock = title !== null ? title.height + TITLE_GAP : 0;
+
+  let neededWidth = 0;
+  let neededHeight = titleBlock;
   for (const row of rows) {
-    row.x = anchorX;
+    neededWidth = Math.max(neededWidth, row.width);
+    neededHeight += row.height + ROW_GAP;
+  }
+  if (rows.length > 0) {
+    neededHeight -= ROW_GAP;
+  }
+  if (neededWidth === 0) {
+    neededWidth = ROW_WIDTH;
+  }
+  neededHeight = Math.max(neededHeight, 1);
+
+  // 広げるのは配置の前、縮めるのは配置の後。先に縮めると、はみ出した行が
+  // 盤面のセクションから抜けてしまう。
+  const grownWidth = Math.max(container.width, neededWidth);
+  const grownHeight = Math.max(container.height, neededHeight);
+  if (grownWidth !== container.width || grownHeight !== container.height) {
+    container.resizeWithoutConstraints(grownWidth, grownHeight);
+  }
+
+  if (title !== null) {
+    title.x = 0;
+    title.y = 0;
+    remember(title);
+  }
+  let cursorY = titleBlock;
+  for (const row of rows) {
+    row.x = 0;
     row.y = cursorY;
     cursorY += row.height + ROW_GAP;
     remember(row);
   }
-  positionTitle(rows);
+
+  if (neededWidth !== container.width || neededHeight !== container.height) {
+    container.resizeWithoutConstraints(neededWidth, neededHeight);
+  }
+  remember(container);
 }
 
 // 盤面の幅。ユーザーがどれか1行の幅を変えたら、それを全行に広げる。
@@ -526,7 +611,7 @@ async function arrangeBoards(targets: string[] | null): Promise<void> {
       }
     }
     if (touched) {
-      relayout(board.rows);
+      relayout(board.container, board.rows);
     }
   }
 }
@@ -633,20 +718,19 @@ async function createBoard(): Promise<void> {
   const totalHeight = DEFAULT_TIERS.length * ROW_HEIGHT + (DEFAULT_TIERS.length - 1) * ROW_GAP;
   const origin = boardOrigin(totalHeight);
   const boardId = newBoardId();
+  const container = makeContainer(boardId, origin.x, origin.y, ROW_WIDTH, totalHeight);
 
   const created: SectionNode[] = [];
   for (let i = 0; i < DEFAULT_TIERS.length; i++) {
     const tier = DEFAULT_TIERS[i];
-    created.push(
-      await createRow(boardId, tier.name, tier.color, origin.x, origin.y + i * (ROW_HEIGHT + ROW_GAP)),
-    );
+    created.push(await createRow(container, tier.name, tier.color, i * (ROW_HEIGHT + ROW_GAP)));
   }
   activeBoardId = boardId;
   for (const row of created) {
     markRow(row.id);
   }
   scheduleArrange();
-  figma.viewport.scrollAndZoomIntoView(created);
+  figma.viewport.scrollAndZoomIntoView([container]);
 }
 
 function nextRowName(rows: SectionNode[]): string {
@@ -670,21 +754,14 @@ async function addRow(): Promise<void> {
     return;
   }
   const last = board.rows[board.rows.length - 1];
-  const row = await createRow(
-    board.id,
-    nextRowName(board.rows),
-    FALLBACK_COLOR_KEY,
-    last.x,
-    last.y + last.height + ROW_GAP,
-  );
+  const y = last !== undefined ? last.y + last.height + ROW_GAP : 0;
+  const row = await createRow(board.container, nextRowName(board.rows), FALLBACK_COLOR_KEY, y);
   row.resizeWithoutConstraints(boardWidth(board.rows), ROW_HEIGHT);
   markRow(row.id);
   scheduleArrange();
   figma.viewport.scrollAndZoomIntoView([row]);
 }
 
-// 逃がし先はページの全コンテンツの下。盤面の真下だと、その位置に別の盤面が
-// あったときに逃がした付箋をそのまま取り込んでしまう。
 function rescueDropY(): number {
   let bottom = -Infinity;
   for (const node of figma.currentPage.children) {
@@ -693,14 +770,15 @@ function rescueDropY(): number {
   return (isFinite(bottom) ? bottom : 0) + RESCUE_MARGIN;
 }
 
-// セクションを消すと中の子ごと消えるため、先に中身を外へ逃がす。
+// セクションを消すと中の子ごと消えるため、先に中身を外へ逃がす。行き先は
+// 盤面のセクションの外（ページ直下）。中に残すと、詰め直した行がそれを踏んで
+// 自動的に子にしてしまう。
 function rescueItems(row: SectionNode, dropY: number): number {
-  const destination = row.parent !== null ? row.parent : figma.currentPage;
   const items = itemsOf(row);
   for (const item of items) {
-    const itemX = item.x;
-    destination.appendChild(item);
-    item.x = row.x + itemX;
+    const pos = pagePosition(item);
+    figma.currentPage.appendChild(item);
+    item.x = pos.x;
     item.y = dropY;
   }
   return items.length;
@@ -712,17 +790,17 @@ async function deleteRow(id: string): Promise<void> {
     return;
   }
   const board = boardOfRow(getBoards(), id);
-  const siblings = board !== null ? board.rows : [row];
   const rescued = rescueItems(row, rescueDropY());
-  const boardId = row.getPluginData(TIER_BOARD_KEY);
   row.remove();
-  const left = siblings.filter((candidate) => candidate.id !== id);
-  relayout(left);
+  if (board === null) {
+    return;
+  }
+  const left = board.rows.filter((candidate) => candidate.id !== id);
   if (left.length === 0) {
-    const title = findTitle(boardId);
-    if (title !== null) {
-      title.remove();
-    }
+    // 行が一枚も無い盤面は器ごと片付ける。見出しも一緒に消える。
+    board.container.remove();
+  } else {
+    relayout(board.container, left);
   }
   if (rescued > 0) {
     figma.notify(`${rescued} 個のアイテムをキャンバスの下に移しました`);
@@ -770,7 +848,7 @@ async function moveRow(id: string, direction: 'up' | 'down'): Promise<void> {
   const swapped = rows[index];
   rows[index] = rows[target];
   rows[target] = swapped;
-  relayout(rows);
+  relayout(board.container, rows);
 }
 
 // パネル上でドラッグ&ドロップされた順序をそのまま反映する。対象は渡された
@@ -797,7 +875,7 @@ function reorderRows(ids: string[]): void {
       ordered.push(row);
     }
   }
-  relayout(ordered);
+  relayout(board.container, ordered);
 }
 
 async function setBoardName(boardId: string, rawName: string): Promise<void> {
@@ -809,24 +887,24 @@ async function setBoardName(boardId: string, rawName: string): Promise<void> {
   for (const row of board.rows) {
     row.setPluginData(TIER_BOARD_NAME_KEY, name);
   }
+  board.container.name = name !== '' ? name : 'Tier表';
 
-  const existing = findTitle(boardId);
+  const existing = findTitle(board.container);
   if (name === '') {
     if (existing !== null) {
       existing.remove();
     }
+    relayout(board.container, board.rows);
     return;
   }
 
   let title = existing;
   if (title === null) {
     title = figma.createText();
-    title.setPluginData(TIER_TITLE_KEY, boardId);
-    // 作った直後はページの原点にいる。行に重なっているとセクションに
-    // 取り込まれてしまうので、先に盤面の上へ逃がしてから中身を入れる。
-    const top = topRow(board.rows);
-    title.x = top.x;
-    title.y = top.y - TITLE_GAP - TITLE_FONT_SIZE * 1.5;
+    title.setPluginData(TIER_TITLE_KEY, '1');
+    board.container.appendChild(title);
+    title.x = 0;
+    title.y = 0;
   }
   const fontName = title.fontName;
   if (typeof fontName !== 'symbol') {
@@ -834,7 +912,8 @@ async function setBoardName(boardId: string, rawName: string): Promise<void> {
     title.characters = name;
     title.fontSize = TITLE_FONT_SIZE;
   }
-  positionTitle(board.rows);
+  title.fills = [{ type: 'SOLID', color: TITLE_FILL }];
+  relayout(board.container, board.rows);
 }
 
 async function setAutoArrange(enabled: boolean): Promise<void> {
@@ -946,7 +1025,7 @@ function boardIdFromSelection(): string | null {
   for (const node of figma.currentPage.selection) {
     let cursor: BaseNode | null = node;
     while (cursor !== null) {
-      if (isTierRow(cursor)) {
+      if (isBoardContainer(cursor)) {
         const id = cursor.getPluginData(TIER_BOARD_KEY);
         return id === '' ? null : id;
       }
