@@ -749,11 +749,16 @@ async function runArrange(): Promise<void> {
 // 真上へ1行ぶんドラッグした付箋が自分の書き込みの反響と区別できなくなり、
 // 人が動かしたのに整列が走らない。
 // 消えたノードは RemovedNode で届く。生きているノードだけを取り出す。
+//
+// `'removed' in node` で判定してはいけない。BaseNodeMixin にも
+// `readonly removed: boolean` があるので、生きているノードでも true になり、
+// すべての変更が「消えたノード」扱いになって整列が一切走らなくなる。
+// 見るのはプロパティの有無ではなく値。
 function liveNode(node: SceneNode | RemovedNode): SceneNode | null {
-  if ('removed' in node) {
+  if (node.removed) {
     return null;
   }
-  return node;
+  return node as SceneNode;
 }
 
 function stamp(node: SceneNode): string {
@@ -1128,7 +1133,13 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
   }
   let marked = false;
   for (const change of changes) {
-    if (change.origin !== 'LOCAL' || !('node' in change)) {
+    if (change.origin !== 'LOCAL') {
+      continue;
+    }
+    // node を持つのはこの3種だけ。スタイルの変更には node が無い。
+    // ここも `'node' in change` で判定しない ── プロパティの有無に頼ると、
+    // 上の removed と同じ形で足をすくわれる。
+    if (change.type !== 'CREATE' && change.type !== 'DELETE' && change.type !== 'PROPERTY_CHANGE') {
       continue;
     }
     const live = liveNode(change.node);
