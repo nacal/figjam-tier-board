@@ -33,7 +33,7 @@ test('行だけをキャンバスへ持ち出しても、元の盤面に戻る',
   assert.equal(sticky.parent.id, row.id, '中の付箋も一緒に戻る');
 });
 
-test('行を下へドラッグすると、その高さの順番になる', async () => {
+test('行をドラッグしても順番は変わらず、元のスロットに戻る', async () => {
   const h = createHarness();
   await h.send({ type: 'create-board' });
   const container = h.containers()[0];
@@ -44,8 +44,46 @@ test('行を下へドラッグすると、その高さの順番になる', async
   dragRowOut(h, row, 0, container.height + 200);
   await h.send({ type: 'arrange-now' });
 
-  assert.deepEqual(h.rows().map((r) => r.name), ['A', 'B', 'C', 'D', 'S'], '末尾へ移る');
-  assert.deepEqual(h.rows().map((r) => r.y), [0, 300, 600, 900, 1200], '隙間なく詰まる');
+  assert.deepEqual(h.rows().map((r) => r.name), ['S', 'A', 'B', 'C', 'D'], '順番は変わらない');
+  assert.equal(row.parent.id, container.id, '盤面に戻る');
+  assert.equal(row.y, 0, '元のスロットに戻る');
+});
+
+test('行を別の行の上に落としても、その行がアイテムとして詰められない', async () => {
+  const h = createHarness();
+  await h.send({ type: 'create-board' });
+  await h.flush();
+  const container = h.containers()[0];
+  const rows = h.rows();
+  const dragged = rows[3];
+
+  // FigJam が行を行の子にしてしまった状態を再現する
+  rows[0].appendChild(dragged);
+  dragged.x = 500;
+  dragged.y = 30;
+
+  h.change(dragged);
+  await h.flush();
+
+  assert.equal(dragged.parent.id, container.id, '盤面に戻る');
+  assert.deepEqual(h.rows().map((r) => r.name), ['S', 'A', 'B', 'C', 'D'], '順番は変わらない');
+  assert.equal(h.items(rows[0]).length, 0, '行が付箋として数えられていない');
+  assert.equal(rows[0].height, 300, '行の高さが荒れていない');
+});
+
+test('矢印で入れ替えた順番は、そのあと行をドラッグしても保たれる', async () => {
+  const h = createHarness();
+  await h.send({ type: 'create-board' });
+  const container = h.containers()[0];
+
+  await h.send({ type: 'move-row', id: h.rows()[0].id, direction: 'down' });
+  assert.deepEqual(h.rows().map((r) => r.name), ['A', 'S', 'B', 'C', 'D']);
+
+  const row = h.rows()[4];
+  dragRowOut(h, row, 0, -(container.height + 500));
+  await h.send({ type: 'arrange-now' });
+
+  assert.deepEqual(h.rows().map((r) => r.name), ['A', 'S', 'B', 'C', 'D'], '矢印で決めた順番が正');
 });
 
 test('行を別の盤面へ移すと、その盤面の行になる', async () => {
