@@ -54,7 +54,8 @@ FigJam 上で Tier 表（tiermaker.com のようなランキング表）を作�
 - 変更は `figma.currentPage.on('nodechange')` と `figma.on('documentchange')` の**両方**で拾う。経路をひとつに賭けると、そちらが何も届けなかったときに自動整列が丸ごと死ぬ。二重に届いても、的は重複を除くしデバウンスでまとめられるので結果は変わらない
 - `documentchange` を使うため、manifest から `documentAccess: "dynamic-page"` を外している。dynamic-page だと `documentchange` は `loadAllPagesAsync` 待ちになる
 - どの経路で購読できたかはパネルの下に出す。自動整列が効かないときに、イベントが届いていないのか整列の側の問題なのかを切り分けられる
-- `documentchange` にはスタイルの変更も混ざってくる。そちらには `node` が無いので、`node` を持つ変更だけを見る
+- `documentchange` にはスタイルの変更も混ざってくる。そちらには `node` が無いので、`change.type` が `CREATE` / `DELETE` / `PROPERTY_CHANGE` のものだけを見る
+- **消えたノードの判定に `'removed' in node` を使ってはいけない。** `BaseNodeMixin` にも `readonly removed: boolean` があるので、生きているノードでも `true` になる。これをやると全部の変更が「消えたノード」扱いになり、整列の的が常に空で自動整列が一度も走らなくなる。見るのはプロパティの有無ではなく値（`node.removed`）。`node` の有無を `'node' in change` で見るのも同じ形の罠
 - ドラッグ中に割り込むと掴んでいる付箋が飛ぶので 320ms デバウンスする。`origin` が `REMOTE`（他の参加者の操作）には反応しない — 全員が同じ行を奪い合って動かし続けるため
 - **変更のあった行だけを並べ直す。** 全行を並べ直すと、ある行を触っただけで別の行の順位まで勝手に組み替わって見える
 - 付箋を行の外へ出したときのために、**どの行にいたかを付箋自身の plugin data に書く**（`figjamTierHome`）。出ていった先の情報だけでは元の行が分からない。メモリだけに持つと、プラグインを開き直した直後は「元の行」が分からず、一度整列を走らせるまで穴が詰まらない
@@ -94,6 +95,8 @@ npm run build   # src/code.ts -> dist/code.js
 npm run watch   # 変更を監視してビルド
 npm test        # ビルドしてロジックのテストを実行
 ```
+
+モックは実物の形に合わせること。ノードは消えていなくても `removed`（`false`）を持つ、付箋も plugin data を持つ ── といった細部がずれていると、そこに依存したバグをテストが素通りさせる。実際にこの2つで素通りした。
 
 テストは `test/harness.mjs` で Figma Plugin API を最小限モックし、コンパイル済みの `dist/code.js` を `vm` で読み込んで UI からのメッセージで駆動する。セクションが重なったノードを自動的に子にする挙動（入れ子も含む）も近似してあるので、付箋の所属判定・左寄せ整列・行削除時の退避・表ごとの移動を Figma なしで確かめられる。
 
