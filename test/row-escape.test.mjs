@@ -31,9 +31,10 @@ test('行だけをキャンバスへ持ち出しても、元の盤面に戻る',
   assert.equal(h.containers().length, 1, '新しい盤面はできない');
   assert.equal(h.rows().length, 5);
   assert.equal(sticky.parent.id, row.id, '中の付箋も一緒に戻る');
+  assert.equal(h.rows()[4].id, row.id, '下へ落としたので末尾になる');
 });
 
-test('行をドラッグしても順番は変わらず、元のスロットに戻る', async () => {
+test('行を下へドラッグすると、その位置の順番になる', async () => {
   const h = createHarness();
   await h.send({ type: 'create-board' });
   const container = h.containers()[0];
@@ -44,9 +45,27 @@ test('行をドラッグしても順番は変わらず、元のスロットに�
   dragRowOut(h, row, 0, container.height + 200);
   await h.send({ type: 'arrange-now' });
 
-  assert.deepEqual(h.rows().map((r) => r.name), ['S', 'A', 'B', 'C', 'D'], '順番は変わらない');
-  assert.equal(row.parent.id, container.id, '盤面に戻る');
-  assert.equal(row.y, 0, '元のスロットに戻る');
+  assert.deepEqual(h.rows().map((r) => r.name), ['A', 'B', 'C', 'D', 'S'], '末尾へ移る');
+  assert.equal(row.parent.id, container.id);
+  assert.deepEqual(h.rows().map((r) => r.y), [0, 300, 600, 900, 1200], '隙間なく詰まる');
+});
+
+test('隣の行の中心を越えるまでは順番が変わらない', async () => {
+  const h = createHarness();
+  await h.send({ type: 'create-board' });
+  const rows = h.rows();
+  const row = rows[0];
+
+  // 1行の高さの半分より手前
+  row.y = 140;
+  await h.send({ type: 'arrange-now' });
+  assert.deepEqual(h.rows().map((r) => r.name), ['S', 'A', 'B', 'C', 'D'], '入れ替わらない');
+  assert.equal(h.rows()[0].y, 0, 'スロットに戻る');
+
+  // 隣の行の中心（450）を越える
+  row.y = 460;
+  await h.send({ type: 'arrange-now' });
+  assert.deepEqual(h.rows().map((r) => r.name), ['A', 'S', 'B', 'C', 'D'], '1つ下と入れ替わる');
 });
 
 test('行を別の行の上に落としても、その行がアイテムとして詰められない', async () => {
@@ -65,13 +84,15 @@ test('行を別の行の上に落としても、その行がアイテムとし�
   h.change(dragged);
   await h.flush();
 
-  assert.equal(dragged.parent.id, container.id, '盤面に戻る');
-  assert.deepEqual(h.rows().map((r) => r.name), ['S', 'A', 'B', 'C', 'D'], '順番は変わらない');
+  assert.equal(dragged.parent.id, container.id, '行の子ではなく盤面の子に戻る');
   assert.equal(h.items(rows[0]).length, 0, '行が付箋として数えられていない');
   assert.equal(rows[0].height, 300, '行の高さが荒れていない');
+  assert.equal(dragged.width, 2964, '行の幅が付箋の幅に潰されていない');
+  assert.equal(h.rows().length, 5, '行は5つのまま');
+  assert.deepEqual(h.rows().map((r) => r.y), [0, 300, 600, 900, 1200], '隙間なく積まれている');
 });
 
-test('矢印で入れ替えた順番は、そのあと行をドラッグしても保たれる', async () => {
+test('矢印での並べ替えと、ドラッグでの並べ替えが噛み合う', async () => {
   const h = createHarness();
   await h.send({ type: 'create-board' });
   const container = h.containers()[0];
@@ -79,11 +100,13 @@ test('矢印で入れ替えた順番は、そのあと行をドラッグして�
   await h.send({ type: 'move-row', id: h.rows()[0].id, direction: 'down' });
   assert.deepEqual(h.rows().map((r) => r.name), ['A', 'S', 'B', 'C', 'D']);
 
+  // いちばん下（D）を盤面の上へドラッグする
   const row = h.rows()[4];
   dragRowOut(h, row, 0, -(container.height + 500));
   await h.send({ type: 'arrange-now' });
 
-  assert.deepEqual(h.rows().map((r) => r.name), ['A', 'S', 'B', 'C', 'D'], '矢印で決めた順番が正');
+  assert.deepEqual(h.rows().map((r) => r.name), ['D', 'A', 'S', 'B', 'C'], 'ドラッグした位置が反映される');
+  assert.deepEqual(h.rows().map((r) => r.y), [0, 300, 600, 900, 1200]);
 });
 
 test('行を別の盤面へ移すと、その盤面の行になる', async () => {
