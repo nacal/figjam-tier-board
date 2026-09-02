@@ -3,7 +3,6 @@ import { emit, on, showUI } from '@create-figma-plugin/utilities';
 import {
   AddRowHandler,
   ArrangeNowHandler,
-  ColorPreset,
   CreateBoardHandler,
   DeleteRowHandler,
   MoveRowHandler,
@@ -17,6 +16,17 @@ import {
   SetRowColorHandler,
   StateHandler,
 } from './events';
+import { COLOR_PRESETS, FALLBACK_COLOR_KEY, findPreset, hexToRgb } from './domain/color';
+import { layoutRow, RowMetrics } from './domain/layout';
+import {
+  applyOrder,
+  byVerticalCenter,
+  nextRowName,
+  resolveBoardWidth,
+  stackPositions,
+  swapNeighbour,
+} from './domain/order';
+import { ArrangeQueue } from './domain/queue';
 
 // FigJam Tier表プラグイン
 //
@@ -47,6 +57,7 @@ const ITEM_GAP = 24;
 const ITEM_WIDTH = 240; // FigJam の付箋の既定幅
 // 上端がこれだけ離れていたら別の段とみなす（付箋の高さの半分）。
 const LINE_TOLERANCE = 120;
+
 const DEFAULT_COLUMNS = 10;
 
 const LABEL_WIDTH = 300;
@@ -57,6 +68,14 @@ const ROW_GAP = 0;
 const ROW_WIDTH =
   LABEL_WIDTH + ITEM_PADDING * 2 + ITEM_WIDTH * DEFAULT_COLUMNS + ITEM_GAP * (DEFAULT_COLUMNS - 1);
 const BOARD_MARGIN = 160;
+const ROW_METRICS: RowMetrics = {
+  labelWidth: LABEL_WIDTH,
+  padding: ITEM_PADDING,
+  gap: ITEM_GAP,
+  minHeight: ROW_HEIGHT,
+  lineTolerance: LINE_TOLERANCE,
+};
+
 // 行を削除したとき、中身を盤面の下へ逃がす距離。
 const RESCUE_MARGIN = 80;
 // 盤面の名前を出す見出しの大きさと、いちばん上の行との間隔。
@@ -83,30 +102,14 @@ const DEFAULT_TIERS: Array<{ name: string; color: string }> = [
   { name: 'D', color: 'green' },
 ];
 
-const COLOR_PRESETS: ColorPreset[] = [
-  { key: 'red', label: 'レッド', hex: '#F19A9A' },
-  { key: 'orange', label: 'オレンジ', hex: '#F5BC85' },
-  { key: 'yellow', label: 'イエロー', hex: '#F8DE94' },
-  { key: 'lemon', label: 'レモン', hex: '#FBFB9C' },
-  { key: 'green', label: 'グリーン', hex: '#CBF6A0' },
-  { key: 'blue', label: 'ブルー', hex: '#A8DAFF' },
-  { key: 'purple', label: 'パープル', hex: '#D3BDFF' },
-  { key: 'gray', label: 'グレー', hex: '#D9D9D9' },
-];
 
-const FALLBACK_COLOR_KEY = 'gray';
 
 let autoArrange = true;
 let activeBoardId: string | null = null;
 let arrangeTimer: ReturnType<typeof setTimeout> | null = null;
 
 // 次の整列で触る行。触っていない行の中身まで並び直さないための的。
-let pendingRowIds: string[] = [];
-let pendingAll = false;
-let pendingDelay = ARRANGE_DEBOUNCE_MS;
-// 行そのものが動かされた。行を重ねると相手の行の中身まで取り込まれるので、
-// このときだけ付箋を元の行へ返す。
-let pendingRowDrag = false;
+const queue = new ArrangeQueue(ARRANGE_DEBOUNCE_MS);
 // 前回の整列時点で、どの付箋がどの行にいたか。付箋が行から出ていったとき、
 // 出ていった先の情報だけでは元の行が分からないので覚えておく。
 // 消えた付箋のぶんだけメモリに持つ。生きている付箋は plugin data 側が正。
@@ -117,29 +120,6 @@ let subscriptions: string[] = [];
 // その反響と人の操作を見分けるために使う。時間で無視する窓にすると、整列の
 // 直後に動かした付箋がまるごと取りこぼされる。
 let written: { [nodeId: string]: string } = {};
-
-function hexToRgb(hex: string): RGB {
-  const value = parseInt(hex.slice(1), 16);
-  return {
-    r: ((value >> 16) & 0xff) / 255,
-    g: ((value >> 8) & 0xff) / 255,
-    b: (value & 0xff) / 255,
-  };
-}
-
-function findPreset(key: string): ColorPreset {
-  for (const preset of COLOR_PRESETS) {
-    if (preset.key === key) {
-      return preset;
-    }
-  }
-  for (const preset of COLOR_PRESETS) {
-    if (preset.key === FALLBACK_COLOR_KEY) {
-      return preset;
-    }
-  }
-  throw new Error('color preset table is broken');
-}
 
 function isTierRow(node: BaseNode): node is SectionNode {
   return node.type === 'SECTION' && node.getPluginData(TIER_FLAG_KEY) === '1';
@@ -368,8 +348,7 @@ function rowsOfContainer(container: SectionNode): SectionNode[] {
       rows.push(child);
     }
   }
-  rows.sort((a, b) => a.y + a.height / 2 - (b.y + b.height / 2));
-  return rows;
+  return byVerticalCenter(rows);
 }
 
 // 盤面ごとのまとまり。並びは、上にある盤面から。
@@ -665,13 +644,16 @@ function relayout(container: SectionNode, rows: SectionNode[]): void {
     title.y = 0;
     remember(title);
   }
-  let cursorY = titleBlock;
-  for (const row of rows) {
+  const positions = stackPositions(
+    rows.map((row) => row.height),
+    ROW_GAP,
+    titleBlock,
+  );
+  rows.forEach((row, index) => {
     row.x = 0;
-    row.y = cursorY;
-    cursorY += row.height + ROW_GAP;
+    row.y = positions[index];
     remember(row);
-  }
+  });
 
   if (neededWidth !== container.width || neededHeight !== container.height) {
     container.resizeWithoutConstraints(neededWidth, neededHeight);
@@ -682,53 +664,13 @@ function relayout(container: SectionNode, rows: SectionNode[]): void {
 // 盤面の幅。ユーザーがどれか1行の幅を変えたら、それを全行に広げる。
 // 「変えた行」は、前回書き込んでおいた幅と実際の幅が食い違う行として見つける。
 function boardWidth(rows: SectionNode[]): number {
-  for (const row of rows) {
-    const stored = parseFloat(row.getPluginData(TIER_WIDTH_KEY));
-    if (isFinite(stored) && Math.abs(stored - row.width) > 0.5) {
-      return row.width;
-    }
-  }
-  for (const row of rows) {
-    const stored = parseFloat(row.getPluginData(TIER_WIDTH_KEY));
-    if (isFinite(stored)) {
-      return stored;
-    }
-  }
-  let widest = ROW_WIDTH;
-  for (const row of rows) {
-    widest = Math.max(widest, row.width);
-  }
-  return widest;
-}
-
-// 行の中の読み順。上の段が先、同じ段では左が先。
-//
-// 中心 x だけで並べてはいけない。折り返すと2段目の左端と1段目の左端が同じ x
-// になり、並べるたびに段が混ざって順序が変わる。順序が変われば位置も変わり、
-// 位置が変われば整列がまた走る ── 2段以上ある行が延々と並び直し続ける。
-function readingOrder(items: SceneNode[]): SceneNode[] {
-  // 段の判定は上端で行う。整列後は同じ段の上端が揃うため。中心で見ると、
-  // 文字が多くて背の高い付箋が同じ段にいるだけで中心がずれ、別の段と
-  // 判定されて順序が入れ替わる ── 段の混ざりと同じ無限ループになる。
-  const byLine = items.slice().sort((a, b) => a.y - b.y);
-  const lines: SceneNode[][] = [];
-  let lineTop = 0;
-  for (const item of byLine) {
-    if (lines.length > 0 && Math.abs(item.y - lineTop) <= LINE_TOLERANCE) {
-      lines[lines.length - 1].push(item);
-    } else {
-      lines.push([item]);
-      lineTop = item.y;
-    }
-  }
-  const ordered: SceneNode[] = [];
-  for (const line of lines) {
-    line.sort((a, b) => a.x + a.width / 2 - (b.x + b.width / 2));
-    for (const item of line) {
-      ordered.push(item);
-    }
-  }
-  return ordered;
+  return resolveBoardWidth(
+    rows.map((row) => {
+      const stored = parseFloat(row.getPluginData(TIER_WIDTH_KEY));
+      return { width: row.width, stored: isFinite(stored) ? stored : null };
+    }),
+    ROW_WIDTH,
+  );
 }
 
 // 行の中身を左上から詰め直す。順位は読み順（上の段が先、同じ段では左が先）
@@ -737,41 +679,8 @@ function readingOrder(items: SceneNode[]): SceneNode[] {
 async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> {
   applyRowChrome(row);
   const label = await ensureLabel(row);
-  const items = readingOrder(itemsOf(row));
-
-  const contentWidth = Math.max(targetWidth - LABEL_WIDTH - ITEM_PADDING * 2, 1);
-  const lines: SceneNode[][] = [];
-  let line: SceneNode[] = [];
-  let lineWidth = 0;
-  for (const item of items) {
-    const widthWithItem = line.length === 0 ? item.width : lineWidth + ITEM_GAP + item.width;
-    if (line.length > 0 && widthWithItem > contentWidth) {
-      lines.push(line);
-      line = [item];
-      lineWidth = item.width;
-    } else {
-      line.push(item);
-      lineWidth = widthWithItem;
-    }
-  }
-  if (line.length > 0) {
-    lines.push(line);
-  }
-
-  let needed = ROW_HEIGHT;
-  const lineHeights: number[] = [];
-  if (lines.length > 0) {
-    let stacked = ITEM_PADDING * 2 + (lines.length - 1) * ITEM_GAP;
-    for (const nodes of lines) {
-      let tallest = 0;
-      for (const node of nodes) {
-        tallest = Math.max(tallest, node.height);
-      }
-      lineHeights.push(tallest);
-      stacked += tallest;
-    }
-    needed = Math.max(Math.round(stacked), ROW_HEIGHT);
-  }
+  const layout = layoutRow(itemsOf(row), targetWidth, ROW_METRICS);
+  const needed = layout.height;
 
   // 広げるのは配置の前、縮めるのは配置の後。先に縮めると、セクションの外に
   // はみ出した付箋やラベルが行から抜けてしまう。
@@ -785,23 +694,17 @@ async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> 
   label.x = 0;
   label.y = 0;
 
-  let cursorY = ITEM_PADDING;
-  for (let i = 0; i < lines.length; i++) {
-    let cursorX = LABEL_WIDTH + ITEM_PADDING;
-    for (const item of lines[i]) {
-      item.x = cursorX;
-      item.y = cursorY;
-      cursorX += item.width + ITEM_GAP;
-      // 所属はノード自身にも書く。メモリだけに持つと、プラグインを開き直した
-      // 直後に「付箋が出ていった元の行」が分からず、穴が詰まらない。
-      itemHome[item.id] = row.id;
-      if (item.getPluginData(ITEM_HOME_KEY) !== row.id) {
-        item.setPluginData(ITEM_HOME_KEY, row.id);
-      }
-      remember(item);
+  layout.items.forEach((item, index) => {
+    item.x = layout.placements[index].x;
+    item.y = layout.placements[index].y;
+    // 所属はノード自身にも書く。メモリだけに持つと、プラグインを開き直した
+    // 直後に「付箋が出ていった元の行」が分からず、穴が詰まらない。
+    itemHome[item.id] = row.id;
+    if (item.getPluginData(ITEM_HOME_KEY) !== row.id) {
+      item.setPluginData(ITEM_HOME_KEY, row.id);
     }
-    cursorY += lineHeights[i] + ITEM_GAP;
-  }
+    remember(item);
+  });
 
   if (targetWidth !== row.width || needed !== row.height) {
     row.resizeWithoutConstraints(targetWidth, needed);
@@ -852,12 +755,8 @@ async function arrangeBoards(targets: string[] | null, rowDragged: boolean): Pro
 }
 
 async function runArrange(): Promise<void> {
-  const targets = pendingAll ? null : pendingRowIds;
-  const rowDragged = pendingRowDrag;
-  pendingAll = false;
-  pendingRowIds = [];
-  pendingRowDrag = false;
-  await arrangeBoards(targets, rowDragged);
+  const request = queue.take();
+  await arrangeBoards(request.targets, request.rowDragged);
   postRows();
 }
 
@@ -888,8 +787,8 @@ function remember(node: SceneNode): void {
 }
 
 function markRow(rowId: string | null): void {
-  if (rowId !== null && pendingRowIds.indexOf(rowId) < 0) {
-    pendingRowIds.push(rowId);
+  if (rowId !== null) {
+    queue.markRow(rowId);
   }
 }
 
@@ -908,16 +807,14 @@ function rowIdOf(node: BaseNode): string | null {
 // 待ち時間はいちばん長いものに合わせる。行が動いているあいだに付箋の変更が
 // 混ざっても、行の並べ替えが割り込まないようにする。
 function scheduleArrange(delay: number): void {
-  pendingDelay = Math.max(pendingDelay, delay);
+  queue.requestDelay(delay);
   if (arrangeTimer !== null) {
     clearTimeout(arrangeTimer);
   }
-  const wait = pendingDelay;
   arrangeTimer = setTimeout(() => {
     arrangeTimer = null;
-    pendingDelay = ARRANGE_DEBOUNCE_MS;
     void runArrange();
-  }, wait);
+  }, queue.pendingDelay);
 }
 
 function postRows(): void {
@@ -994,20 +891,6 @@ async function createBoard(): Promise<void> {
   figma.viewport.scrollAndZoomIntoView([container]);
 }
 
-function nextRowName(rows: SectionNode[]): string {
-  const used: { [name: string]: true } = {};
-  for (const row of rows) {
-    used[row.name] = true;
-  }
-  const alphabet = 'SABCDEFGHIJKLMNOPQRTUVWXYZ';
-  for (const letter of alphabet) {
-    if (used[letter] !== true) {
-      return letter;
-    }
-  }
-  return `Tier ${rows.length + 1}`;
-}
-
 async function addRow(): Promise<void> {
   const board = activeBoard(getBoards());
   if (board === null) {
@@ -1016,7 +899,10 @@ async function addRow(): Promise<void> {
   }
   const last = board.rows[board.rows.length - 1];
   const y = last !== undefined ? last.y + last.height + ROW_GAP : 0;
-  const row = await createRow(board.container, nextRowName(board.rows), FALLBACK_COLOR_KEY, y);
+  const row = await createRow(board.container, nextRowName(
+      board.rows.map((row) => row.name),
+      board.rows.length + 1,
+    ), FALLBACK_COLOR_KEY, y);
   row.resizeWithoutConstraints(boardWidth(board.rows), ROW_HEIGHT);
   markRow(row.id);
   scheduleArrange(ARRANGE_DEBOUNCE_MS);
@@ -1102,14 +988,7 @@ async function moveRow(id: string, direction: 'up' | 'down'): Promise<void> {
   if (index < 0) {
     return;
   }
-  const target = direction === 'up' ? index - 1 : index + 1;
-  if (target < 0 || target >= rows.length) {
-    return;
-  }
-  const swapped = rows[index];
-  rows[index] = rows[target];
-  rows[target] = swapped;
-  relayout(board.container, rows);
+  relayout(board.container, swapNeighbour(rows, index, direction));
 }
 
 // パネル上でドラッグ&ドロップされた順序をそのまま反映する。対象は渡された
@@ -1123,19 +1002,7 @@ function reorderRows(ids: string[]): void {
   if (board === null) {
     return;
   }
-  const rows = board.rows;
-  const ordered: SectionNode[] = [];
-  for (const id of ids) {
-    const row = rows.find((candidate) => candidate.id === id);
-    if (row !== undefined && ordered.indexOf(row) < 0) {
-      ordered.push(row);
-    }
-  }
-  for (const row of rows) {
-    if (ordered.indexOf(row) < 0) {
-      ordered.push(row);
-    }
-  }
+  const ordered = applyOrder(board.rows, ids);
   relayout(board.container, ordered);
 }
 
@@ -1182,7 +1049,7 @@ async function setAutoArrange(enabled: boolean): Promise<void> {
   autoArrange = enabled;
   await figma.clientStorage.setAsync(AUTO_ARRANGE_KEY, enabled);
   if (enabled) {
-    pendingAll = true;
+    queue.markAll();
     await runArrange();
   }
 }
@@ -1226,7 +1093,7 @@ function registerUiHandlers(): void {
     void setBoardName(boardId, name).then(refresh);
   });
   on<ArrangeNowHandler>('ARRANGE_NOW', () => {
-    pendingAll = true;
+    queue.markAll();
     void runArrange();
   });
   on<SetAutoArrangeHandler>('SET_AUTO_ARRANGE', (enabled) => {
@@ -1284,7 +1151,7 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
     // まとめて的にする。並べ替えは手を離してから。
     if (live !== null && isTierRow(live)) {
       delay = Math.max(delay, ROW_SETTLE_MS);
-      pendingRowDrag = true;
+      queue.markRowDragged();
       const container = boardContainerOf(live);
       if (container !== null) {
         for (const child of container.children) {
