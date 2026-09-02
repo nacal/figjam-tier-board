@@ -278,6 +278,54 @@ function wrapLooseRows(): void {
   }
 }
 
+function boardContainerOf(node: BaseNode): SectionNode | null {
+  let cursor: BaseNode | null = node;
+  while (cursor !== null) {
+    if (isBoardContainer(cursor)) {
+      return cursor;
+    }
+    cursor = cursor.parent;
+  }
+  return null;
+}
+
+function isTitle(node: SceneNode): boolean {
+  return node.type === 'TEXT' && node.getPluginData(TIER_TITLE_KEY) === '1';
+}
+
+// 盤面には落ちたが、どの行にも入らなかったアイテムを、重なっている行へ引き取る。
+//
+// FigJam がセクションの入れ子のうち外側（盤面）に付けることがある。プラグイン
+// API で座標を動かしてもセクションは取り込まないので、どちらに付くかはエディタ
+// 側の挙動でしか決まらない。どちらでも動くようにしておく。
+function adoptStrays(board: Board): SectionNode[] {
+  const touched: SectionNode[] = [];
+  if (board.rows.length === 0) {
+    return touched;
+  }
+  for (const child of board.container.children.slice()) {
+    if (isTierRow(child) || isTitle(child)) {
+      continue;
+    }
+    const centerY = child.y + child.height / 2;
+    let target = board.rows[0];
+    for (const row of board.rows) {
+      if (centerY >= row.y) {
+        target = row;
+      }
+    }
+    const x = child.x;
+    const y = child.y;
+    target.appendChild(child);
+    child.x = x - target.x;
+    child.y = y - target.y;
+    if (touched.indexOf(target) < 0) {
+      touched.push(target);
+    }
+  }
+  return touched;
+}
+
 function rowsOfContainer(container: SectionNode): SectionNode[] {
   const rows: SectionNode[] = [];
   for (const child of container.children) {
@@ -665,6 +713,7 @@ async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> 
 //   - 色セルを持たない行がある（古い盤面の移行。中身の置き場所も変わる）
 async function arrangeBoards(targets: string[] | null): Promise<void> {
   for (const board of getBoards()) {
+    const adopted = adoptStrays(board);
     const width = boardWidth(board.rows);
     let forceWhole = false;
     for (const row of board.rows) {
@@ -674,7 +723,7 @@ async function arrangeBoards(targets: string[] | null): Promise<void> {
     }
     let touched = false;
     for (const row of board.rows) {
-      if (targets === null || forceWhole || targets.indexOf(row.id) >= 0) {
+      if (targets === null || forceWhole || adopted.indexOf(row) >= 0 || targets.indexOf(row.id) >= 0) {
         await arrangeRow(row, width);
         touched = true;
       }
@@ -1101,14 +1150,17 @@ function handleNodeChange(event: NodeChangeEvent): void {
       marked = true;
     }
 
-    // 親が変わったのに元の行が分からない付箋（まだ一度も整列していない）は、
-    // どこかの行に穴を空けている。行き先の盤面をまとめて対象にする。
-    if (previous === '' && current !== null && change.type === 'PROPERTY_CHANGE') {
-      if (change.properties.indexOf('parent') >= 0) {
-        const board = boardOfRow(getBoards(), current);
-        if (board !== null) {
-          for (const row of board.rows) {
-            markRow(row.id);
+    // 行には入らなかったが盤面の中にはいるノード（FigJam が外側のセクションに
+    // 付けた付箋）と、元の行が分からないまま親をまたいだ付箋は、どこの行が
+    // 変わったのか特定できない。その盤面の行をまとめて的にする。
+    const reparented = change.type === 'PROPERTY_CHANGE' && change.properties.indexOf('parent') >= 0;
+    if (live !== null && (current === null || (previous === '' && reparented))) {
+      const container = boardContainerOf(live);
+      if (container !== null) {
+        for (const child of container.children) {
+          if (isTierRow(child)) {
+            markRow(child.id);
+            marked = true;
           }
         }
       }
