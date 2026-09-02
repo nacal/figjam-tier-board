@@ -4,13 +4,38 @@
   "private": true,
   "description": "FigJam 上で付箋を並べる Tier 表の行（ティア）を管理するプラグイン",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "watch": "tsc -p tsconfig.json --watch",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test 'test/*.test.mjs'"
+    "build": "build-figma-plugin --typecheck --minify",
+    "watch": "build-figma-plugin --typecheck --watch",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "test": "npm run build:test && vitest run",
+    "test:watch": "vitest",
+    "build:test": "build-figma-plugin --typecheck"
   },
   "devDependencies": {
+    "@create-figma-plugin/build": "^4.0.3",
+    "@create-figma-plugin/tsconfig": "^4.0.3",
     "@figma/plugin-typings": "^1.100.2",
-    "typescript": "^5.6.3"
+    "@types/node": "^26.4.1",
+    "typescript": "^5.6.3",
+    "vitest": "^4.1.11"
+  },
+  "dependencies": {
+    "@create-figma-plugin/ui": "^4.0.3",
+    "@create-figma-plugin/utilities": "^4.0.3",
+    "preact": "^10.29.8"
+  },
+  "figma-plugin": {
+    "editorType": [
+      "figjam"
+    ],
+    "id": "figjam-tier-maker",
+    "name": "Tier表",
+    "main": "src/main.ts",
+    "ui": "src/ui.tsx",
+    "networkAccess": {
+      "allowedDomains": [
+        "none"
+      ]
+    }
   }
 }

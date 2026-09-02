@@ -1,3 +1,13 @@
 node_modules/
+build/
 dist/
 .DS_Store
+
+# create-figma-plugin がビルド時に生成する
+manifest.json
+
+# create-figma-plugin が CSS Modules の型を生成する
+*.css.d.ts
+
+# create-figma-plugin が CSS Modules の型を生成する
+*.css.d.ts
