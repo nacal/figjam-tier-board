@@ -1,0 +1,100 @@
+/* Tier 表に固有の見た目だけ。汎用の部品は @create-figma-plugin/ui に任せる。 */
+
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  border-top: 2px solid transparent;
+  border-bottom: 2px solid var(--figma-color-border);
+}
+
+.dragging {
+  opacity: 0.4;
+}
+
+.dropBefore {
+  border-top-color: var(--figma-color-border-selected);
+}
+
+.dropAfter {
+  border-bottom-color: var(--figma-color-border-selected);
+}
+
+.handle {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  color: var(--figma-color-text-secondary);
+  cursor: grab;
+  user-select: none;
+}
+
+.handle:active {
+  cursor: grabbing;
+}
+
+.swatch {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid var(--figma-color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.count {
+  flex: none;
+  min-width: 20px;
+  text-align: right;
+  color: var(--figma-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.palette {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--figma-color-border);
+}
+
+.palette button {
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--figma-color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.selected {
+  outline: 2px solid var(--figma-color-border-selected);
+  outline-offset: 1px;
+}
+
+.empty {
+  padding: 24px 8px;
+  text-align: center;
+  color: var(--figma-color-text-secondary);
+}
+
+.status {
+  color: var(--figma-color-text-secondary);
+  word-break: break-all;
+}
+
+.statusBad {
+  color: var(--figma-color-text-danger);
+}
