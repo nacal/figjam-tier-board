@@ -21,6 +21,8 @@ const AUTO_ARRANGE_KEY = 'autoArrange';
 const ITEM_PADDING = 24;
 const ITEM_GAP = 24;
 const ITEM_WIDTH = 240; // FigJam の付箋の既定幅
+// 上端がこれだけ離れていたら別の段とみなす（付箋の高さの半分）。
+const LINE_TOLERANCE = 120;
 const DEFAULT_COLUMNS = 10;
 
 const LABEL_WIDTH = 300;
@@ -394,14 +396,43 @@ function boardWidth(rows: SectionNode[]): number {
   return widest;
 }
 
-// 行の中身を左上から詰め直す。順位は中心 x の昇順なので、ドラッグして
-// 落とした位置がそのまま順位になり、落とした先の付箋と場所が入れ替わる。
-// 横幅に収まらない分は折り返し、必要なら行の高さを伸ばす。
+// 行の中の読み順。上の段が先、同じ段では左が先。
+//
+// 中心 x だけで並べてはいけない。折り返すと2段目の左端と1段目の左端が同じ x
+// になり、並べるたびに段が混ざって順序が変わる。順序が変われば位置も変わり、
+// 位置が変われば整列がまた走る ── 2段以上ある行が延々と並び直し続ける。
+function readingOrder(items: SceneNode[]): SceneNode[] {
+  // 段の判定は上端で行う。整列後は同じ段の上端が揃うため。中心で見ると、
+  // 文字が多くて背の高い付箋が同じ段にいるだけで中心がずれ、別の段と
+  // 判定されて順序が入れ替わる ── 段の混ざりと同じ無限ループになる。
+  const byLine = items.slice().sort((a, b) => a.y - b.y);
+  const lines: SceneNode[][] = [];
+  let lineTop = 0;
+  for (const item of byLine) {
+    if (lines.length > 0 && Math.abs(item.y - lineTop) <= LINE_TOLERANCE) {
+      lines[lines.length - 1].push(item);
+    } else {
+      lines.push([item]);
+      lineTop = item.y;
+    }
+  }
+  const ordered: SceneNode[] = [];
+  for (const line of lines) {
+    line.sort((a, b) => a.x + a.width / 2 - (b.x + b.width / 2));
+    for (const item of line) {
+      ordered.push(item);
+    }
+  }
+  return ordered;
+}
+
+// 行の中身を左上から詰め直す。順位は読み順（上の段が先、同じ段では左が先）
+// なので、ドラッグして落とした位置がそのまま順位になり、落とした先の付箋と
+// 場所が入れ替わる。横幅に収まらない分は折り返し、必要なら行の高さを伸ばす。
 async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> {
   applyRowChrome(row);
   const label = await ensureLabel(row);
-  const items = itemsOf(row);
-  items.sort((a, b) => a.x + a.width / 2 - (b.x + b.width / 2));
+  const items = readingOrder(itemsOf(row));
 
   const contentWidth = Math.max(targetWidth - LABEL_WIDTH - ITEM_PADDING * 2, 1);
   const lines: SceneNode[][] = [];
