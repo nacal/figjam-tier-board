@@ -42,6 +42,22 @@
   button:disabled { opacity: 0.35; cursor: default; }
   button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   button.primary:hover:not(:disabled) { background: #0b87e3; }
+  .boards {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .boards select {
+    flex: 1 1 auto;
+    min-width: 0;
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 6px;
+  }
   .options {
     display: flex;
     align-items: center;
@@ -128,10 +144,14 @@
 </head>
 <body>
   <header>
-    <button id="create" class="primary">盤面を作成</button>
+    <button id="create" class="primary" title="新しい盤面をキャンバスの下に作る">盤面を作成</button>
     <button id="add">行を追加</button>
     <button id="reload">再読み込み</button>
   </header>
+
+  <div class="boards" id="boardBar" hidden>
+    <select id="board" title="操作する盤面"></select>
+  </div>
 
   <div class="options">
     <label>
@@ -142,10 +162,12 @@
   </div>
 
   <div id="list"></div>
-  <footer>付箋は FigJam の素の機能で作り、行にドラッグして並べてください。行の順序は ⠿ をドラッグして入れ替えます。どれか1行の右端を引っ張ると、盤面全体の幅が変わります。</footer>
+  <footer>付箋は FigJam の素の機能で作り、行にドラッグして並べてください。行の順序は ⠿ をドラッグして入れ替えます。どれか1行の右端を引っ張ると、その盤面の幅が変わります。盤面はいくつでも作れます。</footer>
 
 <script>
   var presets = [];
+  var boards = [];
+  var activeBoardId = null;
   var rows = [];
   var openPaletteId = null;
   var dragId = null;
@@ -175,11 +197,25 @@
     }
   }
 
+  function renderBoards() {
+    var bar = document.getElementById('boardBar');
+    var select = document.getElementById('board');
+    bar.hidden = boards.length < 2;
+    select.innerHTML = '';
+    boards.forEach(function (board) {
+      var option = document.createElement('option');
+      option.value = board.id;
+      option.textContent = board.label + '（' + board.rowCount + '行）';
+      option.selected = board.id === activeBoardId;
+      select.appendChild(option);
+    });
+  }
+
   function render() {
+    renderBoards();
     var list = document.getElementById('list');
     list.innerHTML = '';
-    document.getElementById('create').disabled = rows.length > 0;
-    document.getElementById('arrange').disabled = rows.length === 0;
+    document.getElementById('arrange').disabled = boards.length === 0;
 
     if (rows.length === 0) {
       var empty = document.createElement('div');
@@ -334,6 +370,10 @@
   document.getElementById('arrange').onclick = function () {
     post({ type: 'arrange-now' });
   };
+  document.getElementById('board').onchange = function (event) {
+    activeBoardId = event.target.value;
+    post({ type: 'select-board', boardId: activeBoardId });
+  };
   document.getElementById('auto').onchange = function (event) {
     post({ type: 'set-auto-arrange', enabled: event.target.checked });
   };
@@ -344,6 +384,8 @@
     // ドラッグ中に再描画すると掴んでいる行が消えるので、終わるまで待つ。
     if (dragId !== null) return;
     presets = message.presets;
+    boards = message.boards;
+    activeBoardId = message.activeBoardId;
     rows = message.rows;
     document.getElementById('auto').checked = message.autoArrange;
     render();
