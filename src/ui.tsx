@@ -7,6 +7,7 @@ import {
   IconButton,
   Muted,
   render,
+  SegmentedControl,
   Text,
   Textbox,
   VerticalSpace,
@@ -18,6 +19,7 @@ import { useCallback, useEffect, useState } from 'preact/hooks';
 import {
   AddRowHandler,
   ArrangeNowHandler,
+  BoardTheme,
   BoardView,
   CreateBoardHandler,
   DeleteRowHandler,
@@ -30,6 +32,7 @@ import {
   SelectBoardHandler,
   SetAutoArrangeHandler,
   SetBoardNameHandler,
+  SetBoardThemeHandler,
   SetRowColorHandler,
   StateHandler,
 } from './events';
@@ -38,6 +41,7 @@ import styles from './ui.css';
 const EMPTY: PanelState = {
   boards: [],
   activeBoardId: null,
+  boardTheme: 'dark',
   rows: [],
   presets: [],
   autoArrange: true,
@@ -107,7 +111,7 @@ function Plugin(): JSX.Element {
       </div>
 
       {state.boards.length > 0 ? (
-        <BoardBar boards={state.boards} active={activeBoard} />
+        <BoardBar boards={state.boards} active={activeBoard} theme={state.boardTheme} />
       ) : null}
 
       <VerticalSpace space="small" />
@@ -251,8 +255,12 @@ function Plugin(): JSX.Element {
   );
 }
 
-function BoardBar(props: { boards: BoardView[]; active: BoardView | null }): JSX.Element {
-  const { boards, active } = props;
+function BoardBar(props: {
+  boards: BoardView[];
+  active: BoardView | null;
+  theme: BoardTheme;
+}): JSX.Element {
+  const { boards, active, theme } = props;
   const [draft, setDraft] = useState<string | null>(null);
   return (
     <div>
@@ -279,6 +287,21 @@ function BoardBar(props: { boards: BoardView[]; active: BoardView | null }): JSX
             emit<SetBoardNameHandler>('SET_BOARD_NAME', active.id, draft);
           }
           setDraft(null);
+        }}
+      />
+      <VerticalSpace space="extraSmall" />
+      {/* キャンバスの色はドキュメントのデータなので、これは見ている人ごとの
+          設定ではなく盤面ごとの設定。初期値はキャンバス背景から決まる。 */}
+      <SegmentedControl
+        options={[
+          { value: 'light', children: 'ライト' },
+          { value: 'dark', children: 'ダーク' },
+        ]}
+        value={theme}
+        onValueChange={(value: string) => {
+          if (active !== null) {
+            emit<SetBoardThemeHandler>('SET_BOARD_THEME', active.id, value as BoardTheme);
+          }
         }}
       />
     </div>
