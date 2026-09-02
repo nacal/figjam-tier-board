@@ -34,6 +34,8 @@ export interface FakeNode {
   text?: { characters: string; fontSize: number; fontName: unknown };
   characters?: string;
   fills?: unknown[];
+  strokes?: unknown[];
+  backgrounds?: unknown[];
   shapeType?: string;
   resize(width: number, height: number): void;
   resizeWithoutConstraints(width: number, height: number): void;
@@ -103,6 +105,10 @@ export function createHarness() {
     parent: null,
     children: [] as FakeNode[],
     selection: [] as FakeNode[],
+    // 実物の PageNode は backgrounds を持つ。FigJam のライトの既定は実測 #E5E5E5。
+    backgrounds: [
+      { type: 'SOLID', color: { r: 0xe5 / 255, g: 0xe5 / 255, b: 0xe5 / 255 } },
+    ] as unknown[],
     listeners: [] as Listener[],
     pluginData: {} as Record<string, string>,
     ...pluginDataMixin,
@@ -466,6 +472,21 @@ export function createHarness() {
     settle();
   }
 
+  // キャンバス背景を差し替える。新しい盤面の配色がこれで決まる。
+  function setCanvasBackground(hex: string): void {
+    const value = parseInt(hex.slice(1), 16);
+    page.backgrounds = [
+      {
+        type: 'SOLID',
+        color: {
+          r: ((value >> 16) & 0xff) / 255,
+          g: ((value >> 8) & 0xff) / 255,
+          b: (value & 0xff) / 255,
+        },
+      },
+    ];
+  }
+
   // キャンバスでの選択を再現する。パネルの操作対象がこれに追従する。
   function select(nodes: FakeNode | FakeNode[]): void {
     page.selection = Array.isArray(nodes) ? nodes : [nodes];
@@ -589,6 +610,7 @@ export function createHarness() {
     changeVia,
     flush,
     select,
+    setCanvasBackground,
     state,
     rows,
     containers,

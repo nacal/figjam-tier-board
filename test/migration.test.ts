@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
+import { hexToRgb } from '../src/domain/color';
+import { BOARD_PALETTES } from '../src/domain/theme';
 import { createHarness, type FakeNode, type Harness } from './harness';
 
 // 色セルが無く、行に色が塗ってあり、幅も狭く、器にも入っていない
@@ -56,9 +58,12 @@ test('包み直しても中身と見た目は移行する', async () => {
     assert.equal(label.width, 300);
     assert.equal(label.height, row.height);
     // vm 側で作られたオブジェクトなのでプロトタイプが違う。値で比べる。
-    assert.deepEqual(JSON.parse(JSON.stringify(row.fills)), [
-      { type: 'SOLID', color: { r: 0.106, g: 0.106, b: 0.106 } },
-    ], '面が暗くなる');
+    // 配色を持たない盤面は既定のダークのまま（開いた途端に色が変わらない）。
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(row.fills)),
+      [{ type: 'SOLID', color: hexToRgb(BOARD_PALETTES.dark.content) }],
+      '面が暗くなる',
+    );
     assert.equal(row.width, 2964, '既定幅に広がる');
   }
 

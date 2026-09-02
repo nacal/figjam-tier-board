@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'vitest';
+import { relativeLuminance } from '../src/domain/theme';
 import { createHarness, type FakeNode, type Harness } from './harness';
 
 function containerOf(h: Harness, boardId: string): FakeNode | null {
@@ -120,13 +121,15 @@ test('盤面の行を全部消すと器ごと片付く', async () => {
   assert.equal(containerOf(h, id), null, '見出しごと消える');
 });
 
-test('見出しの文字は暗い面の上でも読める明るさになる', async () => {
+test('見出しの文字は行の面と十分な明暗差がある', async () => {
   const h = createHarness();
   const id = await board(h);
 
   await h.send('SET_BOARD_NAME', id, '読めるか');
 
-  const fills = JSON.parse(JSON.stringify(title(h, id)!.fills));
-  assert.equal(fills.length, 1);
-  assert.ok(fills[0].color.r > 0.8 && fills[0].color.g > 0.8 && fills[0].color.b > 0.8);
+  const container = containerOf(h, id)!;
+  const titleFill = JSON.parse(JSON.stringify(title(h, id)!.fills))[0].color;
+  const rowFill = JSON.parse(JSON.stringify(h.rowsOf(container)[0].fills))[0].color;
+  const diff = Math.abs(relativeLuminance(titleFill) - relativeLuminance(rowFill));
+  assert.ok(diff > 0.5, `面と見出しの差が ${diff.toFixed(2)} しかない`);
 });
