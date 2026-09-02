@@ -39,9 +39,9 @@ async function boardOn(h: Harness, background: string): Promise<FakeNode> {
   return h.containers()[0];
 }
 
-test('明るいキャンバスに作った盤面はライト配色になる', async () => {
+test('a board created on a light canvas gets the light palette', async () => {
   const h = createHarness();
-  // FigJam のライトの既定（実測値）
+  // FigJam's light default, as measured.
   const container = await boardOn(h, '#E5E5E5');
 
   assert.equal(h.state().boardTheme, 'light');
@@ -49,9 +49,9 @@ test('明るいキャンバスに作った盤面はライト配色になる', as
   assert.equal(strokeHex(h.rowsOf(container)[0]), BOARD_PALETTES.light.border.toUpperCase());
 });
 
-test('暗いキャンバスに作った盤面はダーク配色になる', async () => {
+test('a board created on a dark canvas gets the dark palette', async () => {
   const h = createHarness();
-  // Figma のダークの既定
+  // Figma's dark default.
   const container = await boardOn(h, '#1E1E1E');
 
   assert.equal(h.state().boardTheme, 'dark');
@@ -59,14 +59,14 @@ test('暗いキャンバスに作った盤面はダーク配色になる', async
   assert.equal(strokeHex(h.rowsOf(container)[0]), BOARD_PALETTES.dark.border.toUpperCase());
 });
 
-test('ライトの面はキャンバスより明るく、境界線だけの見た目にならない', async () => {
+test('the light face is brighter than the canvas, so more than the borders shows', async () => {
   const h = createHarness();
   const container = await boardOn(h, '#E5E5E5');
 
   assert.notEqual(fillHex(h.rowsOf(container)[0]), '#E5E5E5');
 });
 
-test('切り替えると行・器・境界線が塗り替わる', async () => {
+test('switching repaints rows, container and borders', async () => {
   const h = createHarness();
   const container = await boardOn(h, '#E5E5E5');
   const id = h.state().boards[0].id;
@@ -76,14 +76,14 @@ test('切り替えると行・器・境界線が塗り替わる', async () => {
   await h.flush();
 
   assert.equal(h.state().boardTheme, 'dark');
-  assert.equal(fillHex(container), BOARD_PALETTES.dark.content.toUpperCase(), '器も塗り替わる');
+  assert.equal(fillHex(container), BOARD_PALETTES.dark.content.toUpperCase(), 'the container is repainted too');
   for (const row of h.rowsOf(container)) {
     assert.equal(fillHex(row), BOARD_PALETTES.dark.content.toUpperCase());
     assert.equal(strokeHex(row), BOARD_PALETTES.dark.border.toUpperCase());
   }
 });
 
-test('切り替えても色セルの色は変わらない', async () => {
+test('switching the palette leaves tier colours alone', async () => {
   const h = createHarness();
   const container = await boardOn(h, '#E5E5E5');
   const id = h.state().boards[0].id;
@@ -95,25 +95,25 @@ test('切り替えても色セルの色は変わらない', async () => {
   assert.deepEqual(
     h.rowsOf(container).map((row) => fillHex(h.label(row)!)),
     before,
-    'ティアの色はパステルのままで、どちらの配色でも読める',
+    'tier colours stay pastel and read on either palette',
   );
 });
 
-test('見出しの文字色も切り替わる', async () => {
+test('the heading colour switches too', async () => {
   const h = createHarness();
   const container = await boardOn(h, '#E5E5E5');
   const id = h.state().boards[0].id;
-  await h.send('SET_BOARD_NAME', id, '名前');
+  await h.send('SET_BOARD_NAME', id, 'Name');
   assert.equal(fillHex(h.titleOf(container)!), BOARD_PALETTES.light.title.toUpperCase());
 
   await h.send('SET_BOARD_THEME', id, 'dark');
   await h.flush();
-  await h.send('SET_BOARD_NAME', id, '名前2');
+  await h.send('SET_BOARD_NAME', id, 'Name 2');
 
   assert.equal(fillHex(h.titleOf(container)!), BOARD_PALETTES.dark.title.toUpperCase());
 });
 
-test('盤面ごとに別の配色を持てる', async () => {
+test('each board can have its own palette', async () => {
   const h = createHarness();
   h.setCanvasBackground('#E5E5E5');
   await h.send('CREATE_BOARD');
@@ -126,10 +126,10 @@ test('盤面ごとに別の配色を持てる', async () => {
 
   const [first, second] = h.containers();
   assert.equal(fillHex(first), BOARD_PALETTES.dark.content.toUpperCase());
-  assert.equal(fillHex(second), BOARD_PALETTES.light.content.toUpperCase(), 'もう一方は変わらない');
+  assert.equal(fillHex(second), BOARD_PALETTES.light.content.toUpperCase(), 'the other is unchanged');
 });
 
-test('背景が読めないときは既定のダーク', async () => {
+test('dark by default when the background cannot be read', async () => {
   const h = createHarness();
   h.page.backgrounds = [];
   await h.send('CREATE_BOARD');

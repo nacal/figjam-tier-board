@@ -4,8 +4,8 @@ import { hexToRgb } from '../src/domain/color';
 import { BOARD_PALETTES } from '../src/domain/theme';
 import { createHarness, type FakeNode, type Harness } from './harness';
 
-// 色セルが無く、行に色が塗ってあり、幅も狭く、器にも入っていない
-// ── 旧バージョンが作った盤面
+// No tier label, colour painted on the row, narrow, and outside any container:
+// a board from an older version.
 function legacyRow(
   h: Harness,
   { name, color, x, y, width }: { name: string; color: string; x: number; y: number; width: number },
@@ -22,57 +22,57 @@ function legacyRow(
   return row;
 }
 
-test('器に入っていない旧盤面は、まとめてひとつの盤面として包み直される', async () => {
+test('legacy rows with no container are wrapped together as one board', async () => {
   const h = createHarness();
   const legacy = [
     legacyRow(h, { name: 'S', color: 'red', x: 100, y: 200, width: 1608 }),
     legacyRow(h, { name: 'A', color: 'orange', x: 100, y: 540, width: 1608 }),
   ];
-  h.createSticky('マイクラ', 124, 230);
+  h.createSticky('Minecraft', 124, 230);
   h.settle();
-  assert.equal(h.items(legacy[0]).length, 1, '付箋は旧盤面の中にいる');
+  assert.equal(h.items(legacy[0]).length, 1, 'the sticky is inside the legacy board');
 
   await h.send('ARRANGE_NOW');
 
   const containers = h.containers();
-  assert.equal(containers.length, 1, '器がひとつできる');
-  assert.deepEqual(h.absolute(containers[0]), { x: 100, y: 200 }, '元の場所を保つ');
+  assert.equal(containers.length, 1, 'one container is created');
+  assert.deepEqual(h.absolute(containers[0]), { x: 100, y: 200 }, 'keeps its original position');
   for (const row of h.rows()) {
-    assert.equal(row.parent!.id, containers[0].id, '行は器の子になる');
+    assert.equal(row.parent!.id, containers[0].id, 'rows become children of the container');
   }
 });
 
-test('包み直しても中身と見た目は移行する', async () => {
+test('wrapping migrates the contents and the look', async () => {
   const h = createHarness();
   legacyRow(h, { name: 'S', color: 'red', x: 0, y: 0, width: 1608 });
   legacyRow(h, { name: 'A', color: 'orange', x: 0, y: 340, width: 1608 });
-  const sticky = h.createSticky('マイクラ', 24, 30);
+  const sticky = h.createSticky('Minecraft', 24, 30);
   h.settle();
 
   await h.send('ARRANGE_NOW');
 
   for (const row of h.rows()) {
     const label = h.label(row);
-    assert.ok(label, '色セルが足される');
+    assert.ok(label, 'a tier label is added');
     assert.equal(h.labelText(row), row.name);
     assert.equal(label.width, 300);
     assert.equal(label.height, row.height);
-    // vm 側で作られたオブジェクトなのでプロトタイプが違う。値で比べる。
-    // 配色を持たない盤面は既定のダークのまま（開いた途端に色が変わらない）。
+    // Built in the vm context, so the prototype differs; compare by value.
+    // A board with no palette keeps the dark default rather than recolouring on open.
     assert.deepEqual(
       JSON.parse(JSON.stringify(row.fills)),
       [{ type: 'SOLID', color: hexToRgb(BOARD_PALETTES.dark.content) }],
-      '面が暗くなる',
+      'the face goes dark',
     );
-    assert.equal(row.width, 2964, '既定幅に広がる');
+    assert.equal(row.width, 2964, 'widens to the default');
   }
 
-  assert.equal(h.rows()[1].y, h.rows()[0].y + h.rows()[0].height, '隙間が詰まる');
-  assert.equal(sticky.parent!.id, h.rows()[0].id, '中身は行に残る');
-  assert.equal(sticky.x, 324, '色セルの右へ寄せ直される');
+  assert.equal(h.rows()[1].y, h.rows()[0].y + h.rows()[0].height, 'the gap closes');
+  assert.equal(sticky.parent!.id, h.rows()[0].id, 'the contents stay in the row');
+  assert.equal(sticky.x, 324, 'is repositioned right of the tier label');
 });
 
-test('移行後の整列は面を塗り直さない', async () => {
+test('arranging after migration does not repaint the face', async () => {
   const h = createHarness();
   legacyRow(h, { name: 'S', color: 'red', x: 0, y: 0, width: 1608 });
   await h.send('ARRANGE_NOW');
@@ -80,10 +80,10 @@ test('移行後の整列は面を塗り直さない', async () => {
 
   await h.send('ARRANGE_NOW');
 
-  assert.equal(h.rows()[0].fills, fills, '同じ配列のまま（無駄な書き込みをしない）');
+  assert.equal(h.rows()[0].fills, fills, 'same array, so nothing was rewritten');
 });
 
-test('包み直したあとは表ごと動かせる', async () => {
+test('once wrapped, the whole table can be moved', async () => {
   const h = createHarness();
   legacyRow(h, { name: 'S', color: 'red', x: 0, y: 0, width: 1608 });
   legacyRow(h, { name: 'A', color: 'orange', x: 0, y: 340, width: 1608 });
@@ -94,6 +94,6 @@ test('包み直したあとは表ごと動かせる', async () => {
   h.settle();
   await h.send('ARRANGE_NOW');
 
-  assert.equal(h.absolute(container).x, 900, '動かした場所に留まる');
+  assert.equal(h.absolute(container).x, 900, 'stays where it was moved');
   assert.equal(h.rows().length, 2);
 });

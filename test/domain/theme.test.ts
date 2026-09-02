@@ -10,7 +10,7 @@ import {
   themeForBackground,
 } from '../../src/domain/theme';
 
-test('ライトとダークで面・境界線・見出しの色が入れ替わる', () => {
+test('light and dark differ in face, border and heading', () => {
   const dark = paletteFor('dark');
   const light = paletteFor('light');
   assert.notEqual(dark.content, light.content);
@@ -18,48 +18,48 @@ test('ライトとダークで面・境界線・見出しの色が入れ替わ�
   assert.notEqual(dark.title, light.title);
 });
 
-test('見出しの文字は面と十分な明暗差がある', () => {
+test('the heading contrasts enough with the face', () => {
   for (const theme of ['light', 'dark'] as const) {
     const palette = BOARD_PALETTES[theme];
     const diff = Math.abs(
       relativeLuminance(hexToRgb(palette.content)) - relativeLuminance(hexToRgb(palette.title)),
     );
-    assert.ok(diff > 0.5, `${theme}: 面と見出しの差が ${diff.toFixed(2)} しかない`);
+    assert.ok(diff > 0.5, `${theme}: face vs heading differs by only ${diff.toFixed(2)}`);
   }
 });
 
-test('ライトの面はキャンバスより明るい（境界線だけの見た目にならない）', () => {
-  // FigJam のライトの既定背景（実測値）
+test('the light face is brighter than the canvas, so more than the borders shows', () => {
+  // FigJam's light default background, as measured.
   const canvas = relativeLuminance(hexToRgb('#E5E5E5'));
   const content = relativeLuminance(hexToRgb(BOARD_PALETTES.light.content));
-  assert.ok(content > canvas, '面が背景より暗いとカードに見えない');
+  assert.ok(content > canvas, 'a face darker than the background would not read as a card');
 });
 
-test('キャンバス背景の明暗で配色が決まる', () => {
-  // Figma の既定値: ライト #F5F5F5 / ダーク #1E1E1E、FigJam の実測は #E5E5E5
+test('the palette follows the lightness of the canvas background', () => {
+  // Figma defaults: light #F5F5F5, dark #1E1E1E. FigJam measures #E5E5E5.
   assert.equal(themeForBackground(hexToRgb('#F5F5F5'), 'dark'), 'light');
   assert.equal(themeForBackground(hexToRgb('#E5E5E5'), 'dark'), 'light');
   assert.equal(themeForBackground(hexToRgb('#1E1E1E'), 'light'), 'dark');
   assert.equal(themeForBackground(hexToRgb('#000000'), 'light'), 'dark');
 });
 
-test('背景が読めなければ既定のまま', () => {
+test('falls back when the background cannot be read', () => {
   assert.equal(themeForBackground(null, 'dark'), 'dark');
   assert.equal(themeForBackground(null, 'light'), 'light');
 });
 
-test('輝度は緑を重く、青を軽く見る（単純な平均ではない）', () => {
+test('luminance weights green over blue, unlike a plain average', () => {
   const green = relativeLuminance(hexToRgb('#00FF00'));
   const blue = relativeLuminance(hexToRgb('#0000FF'));
   assert.ok(green > blue);
-  // 平均だとどちらも 1/3 になり、真緑の背景をダークと誤判定する
+  // A plain average makes both 1/3 and reads a pure green background as dark.
   assert.equal(themeForBackground(hexToRgb('#00FF00'), 'dark'), 'light');
   assert.equal(themeForBackground(hexToRgb('#0000FF'), 'light'), 'dark');
 });
 
-test('読めない値は既定に落ちる', () => {
+test('an unreadable value falls back to the default', () => {
   assert.equal(parseTheme('light', 'dark'), 'light');
   assert.equal(parseTheme('dark', 'light'), 'dark');
-  assert.equal(parseTheme('', 'dark'), 'dark', '配色を持たない盤面は既定のまま');
+  assert.equal(parseTheme('', 'dark'), 'dark', 'a board with no palette keeps the default');
   assert.equal(parseTheme('sepia', 'light'), 'light');
 });

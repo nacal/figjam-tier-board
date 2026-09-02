@@ -1,19 +1,19 @@
-// Figma Plugin API の最小モック。ビルド済みの build/main.js をそのまま読み込んで、
-// UI からのイベントで駆動し、キャンバスの状態を検査できるようにする。
+// A minimal Figma Plugin API mock. Loads the built build/main.js as is, drives it
+// with UI events, and lets tests inspect the resulting canvas.
 //
-// セクションの「幾何的に内包したノードを自動的に子にする」挙動（入れ子も含む）
-// も再現する。この挙動に依存した実装を試すため。
+// Section adoption of overlapping nodes is reproduced too, nesting included,
+// because the implementation leans on it.
 //
-// モックは実物の形に合わせること。ずれていると、そこに依存したバグをテストが
-// 素通りさせる。下の ModeledProps / 型アサーションがその歯止め。
+// Keep the mock shaped like the real API. Drift lets bugs that depend on the
+// difference pass unnoticed; ModeledSceneProps below is the guard against that.
 
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
 import type { PanelState } from '../src/events';
 
-// プラグインが実際に触るプロパティ。ここに挙げたものは、実物の型と一致して
-// いなければコンパイルで落ちる（値の型も、存在そのものも）。
+// Properties the plugin actually touches. Anything listed here must match the
+// real type, in value type and in existence, or this fails to compile.
 type ModeledSceneProps = 'id' | 'name' | 'x' | 'y' | 'width' | 'height' | 'removed' | 'locked';
 
 export interface FakeNode {
@@ -30,7 +30,7 @@ export interface FakeNode {
   children: FakeNode[];
   appendChild(child: FakeNode): void;
   pluginData: Record<string, string>;
-  // テストから読むもの。実物にもあるが、モックでは必要な分だけ宣言する。
+  // Read from tests. Real nodes have more; the mock declares only what is needed.
   text?: { characters: string; fontSize: number; fontName: unknown };
   characters?: string;
   fills?: unknown[];
@@ -47,7 +47,7 @@ export interface FakeNode {
 
 export type FakeParent = FakeNode;
 
-// モックが実物のサブセットとして通ることを保証する歯止め
+// Fails to compile if the mock stops being a subset of the real node.
 type Assert<T extends Pick<SectionNode, ModeledSceneProps>> = T;
 export type CheckedFake = Assert<Pick<FakeNode, ModeledSceneProps>>;
 
@@ -105,7 +105,7 @@ export function createHarness() {
     parent: null,
     children: [] as FakeNode[],
     selection: [] as FakeNode[],
-    // 実物の PageNode は backgrounds を持つ。FigJam のライトの既定は実測 #E5E5E5。
+    // Real PageNodes carry backgrounds; FigJam's light default measures #E5E5E5.
     backgrounds: [
       { type: 'SOLID', color: { r: 0xe5 / 255, g: 0xe5 / 255, b: 0xe5 / 255 } },
     ] as unknown[],
@@ -218,8 +218,7 @@ export function createHarness() {
   }
 
   function createText(): FakeNode {
-    // 文字とフォントサイズからサイズを決める。実物のテキストノードも文字を
-    // 入れると寸法が変わるので、そこだけ真似る。
+    // Size follows the characters and font size, as it does on a real text node.
     const internals = { characters: '', fontSize: 12 };
     const text = {
       type: 'TEXT',
@@ -366,8 +365,8 @@ export function createHarness() {
     });
   }
 
-  // プラグインを開き直す。前回の実行が覚えていたこと（整列が最後に書いた位置、
-  // どの付箋がどの行にいたか）は失われ、イベントの購読も張り直しになる。
+  // Reopens the plugin: what the previous run remembered is lost and the event
+  // subscriptions are re-established.
   function restart(): void {
     page.listeners.length = 0;
     globalListeners.length = 0;
@@ -376,9 +375,9 @@ export function createHarness() {
 
   boot();
 
-  // FigJam のセクションは、重なったノードを自動的に子にする。中心が入って
-  // いれば取り込み、外に出れば手放す、として近似する。盤面のセクションの中に
-  // 行のセクションがあるので、いちばん内側のセクションに属させる。
+  // Approximates FigJam section adoption: a node whose centre is inside belongs
+  // to it, one outside is released, and since rows sit inside boards the innermost
+  // section wins.
   function settle(): void {
     const sections = page.findAllWithCriteria({ types: ['SECTION'] });
     const depthOf = (node: FakeNode): number => {
@@ -428,8 +427,8 @@ export function createHarness() {
     }
   }
 
-  // キャンバス側でノードが変わったことを通知する。プラグインはこれを拾って
-  // デバウンス付きで整列するので、待つときは flush を使う。
+  // Notifies the plugin that a node changed. Arranging is debounced, so wait with
+  // flush.
   function deliver(entries: unknown[], channel: 'both' | 'nodechange' | 'documentchange'): void {
     if (channel === 'both' || channel === 'nodechange') {
       for (const listener of page.listeners) {
@@ -466,13 +465,13 @@ export function createHarness() {
     deliver(entriesFor(nodes), channel);
   }
 
-  // デバウンスと反響の判定を越えるまで待ってから、セクションの取り込みを反映する。
+  // Waits past the debounce, then applies section adoption.
   async function flush(ms = 600): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, ms));
     settle();
   }
 
-  // キャンバス背景を差し替える。新しい盤面の配色がこれで決まる。
+  // Replaces the canvas background, which decides a new board's palette.
   function setCanvasBackground(hex: string): void {
     const value = parseInt(hex.slice(1), 16);
     page.backgrounds = [
@@ -487,7 +486,7 @@ export function createHarness() {
     ];
   }
 
-  // キャンバスでの選択を再現する。パネルの操作対象がこれに追従する。
+  // Reproduces a canvas selection, which the panel's active board follows.
   function select(nodes: FakeNode | FakeNode[]): void {
     page.selection = Array.isArray(nodes) ? nodes : [nodes];
     for (const listener of globalListeners) {
@@ -497,19 +496,19 @@ export function createHarness() {
     }
   }
 
-  // UI から main へイベントを送る。封筒は create-figma-plugin の [name, ...args]。
+  // Sends a UI event to main in create-figma-plugin's [name, ...args] envelope.
   async function send(name: string, ...args: unknown[]): Promise<void> {
     if (figma.ui.onmessage === null) {
       throw new Error('plugin did not subscribe to ui messages');
     }
     figma.ui.onmessage([name, ...args]);
-    // ハンドラは非同期なので、進むまで待つ
+    // Handlers are async, so let them progress.
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     settle();
   }
 
-  // main が最後に送ってきたパネルの状態
+  // The panel state main last sent.
   function state(): PanelState {
     for (let i = uiMessages.length - 1; i >= 0; i--) {
       const message = uiMessages[i];
@@ -520,7 +519,7 @@ export function createHarness() {
     throw new Error('no STATE message yet');
   }
 
-  // 盤面（行を包むセクション）を上から順に
+  // Boards, topmost first.
   function containers(): FakeNode[] {
     return page
       .findAllWithCriteria({ types: ['SECTION'] })
@@ -550,7 +549,7 @@ export function createHarness() {
     return out;
   }
 
-  // 色セルは持ち主の行 ID を持つ（空でなければ色セル）
+  // A tier label carries its owner row id, so a non-empty value marks one.
   function items(row: FakeNode): FakeNode[] {
     return (row.children ?? []).filter(
       (child) =>
@@ -561,7 +560,7 @@ export function createHarness() {
     );
   }
 
-  // 色セルの文字。無ければ落とす（テストから毎回 null 検査したくない）
+  // Throws rather than making every test null-check.
   function labelText(row: FakeNode): string {
     const cell = label(row);
     if (cell === null) {
@@ -574,7 +573,7 @@ export function createHarness() {
     return (row.children ?? []).find((child) => child.getPluginData('figjamTierLabel') !== '') ?? null;
   }
 
-  // 行の中の座標（左上からの相対）を指定して付箋を置く
+  // Places a sticky at a position relative to the row's top left.
   function dropIn(row: FakeNode, text: string, dx: number, dy: number): FakeNode {
     const at = absolute(row);
     const sticky = createSticky(text, at.x + dx, at.y + dy);
@@ -582,8 +581,8 @@ export function createHarness() {
     return sticky;
   }
 
-  // 盤面（外側のセクション）に直接ぶら下げる。FigJam が入れ子のうち外側に
-  // 付けた場合を再現する。settle は呼ばない（呼ぶと内側の行へ移ってしまう）。
+  // Attaches straight to the board, reproducing FigJam picking the outer section.
+  // settle is not called, as it would move the sticky into the inner row.
   function dropOnBoard(box: FakeNode, text: string, dx: number, dy: number): FakeNode {
     const sticky = createSticky(text, 0, 0);
     (box as FakeParent).appendChild(sticky);
@@ -592,8 +591,8 @@ export function createHarness() {
     return sticky;
   }
 
-  // 行を別の盤面へ入れる。セクションを別のセクションへ入れ子にするのは
-  // FigJam 側の仕事なので、その結果だけを再現する。
+  // Nesting a section inside another is FigJam's job, so only the outcome is
+  // reproduced.
   function moveRowInto(row: FakeNode, box: FakeNode, y: number): void {
     (box as FakeParent).appendChild(row);
     row.x = 0;

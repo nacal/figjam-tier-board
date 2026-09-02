@@ -53,9 +53,9 @@ function Plugin(): JSX.Element {
   const [openPalette, setOpenPalette] = useState<string | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ id: string; after: boolean } | null>(null);
-  // 並べ替え中はキャンバス側からの状態で上書きしない（掴んでいる行が消える）
+  // Held while dragging: overwriting from canvas state would drop the grabbed row.
   const [localRows, setLocalRows] = useState<RowView[] | null>(null);
-  // 入力中の名前。キャンバス側からの状態でカーソルが飛ばないように下書きを持つ。
+  // Names being typed, kept as drafts so canvas state cannot move the caret.
   const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
@@ -97,16 +97,16 @@ function Plugin(): JSX.Element {
       <VerticalSpace space="small" />
 
       <div style={{ display: 'flex', gap: '8px' }}>
-        <Button onClick={() => emit<CreateBoardHandler>('CREATE_BOARD')}>盤面を作成</Button>
+        <Button onClick={() => emit<CreateBoardHandler>('CREATE_BOARD')}>Create board</Button>
         <Button secondary onClick={() => emit<AddRowHandler>('ADD_ROW')}>
-          行を追加
+          Add row
         </Button>
         <Button
           secondary
           disabled={state.boards.length === 0}
           onClick={() => emit<ArrangeNowHandler>('ARRANGE_NOW')}
         >
-          今すぐ整列
+          Arrange now
         </Button>
       </div>
 
@@ -119,7 +119,7 @@ function Plugin(): JSX.Element {
         value={state.autoArrange}
         onValueChange={(value) => emit<SetAutoArrangeHandler>('SET_AUTO_ARRANGE', value)}
       >
-        <Text>ドラッグしたら左寄せで自動整列</Text>
+        <Text>Pack rows to the left as items are dragged</Text>
       </Checkbox>
       <VerticalSpace space="small" />
       <Divider />
@@ -127,7 +127,7 @@ function Plugin(): JSX.Element {
 
       {rows.length === 0 ? (
         <div class={styles.empty}>
-          <Muted>このページにはまだ Tier 表がありません。</Muted>
+          <Muted>No tier board on this page yet.</Muted>
         </div>
       ) : (
         <ul class={styles.rows}>
@@ -162,11 +162,11 @@ function Plugin(): JSX.Element {
                   handleDrop(row, event.clientY > box.top + box.height / 2);
                 }}
               >
-                {/* ハンドルを押している間だけ draggable にする。行全体を掴めると
-                    名前の入力欄でテキストを選べなくなる。 */}
+                {/* Draggable only while the handle is held; a draggable row would
+                    make the name field impossible to select text in. */}
                 <span
                   class={styles.handle}
-                  title="ドラッグして行の順序を入れ替え"
+                  title="Drag to reorder rows"
                   onMouseDown={() => setDragId(row.id)}
                   onMouseUp={() => setDragId(null)}
                 >
@@ -176,7 +176,7 @@ function Plugin(): JSX.Element {
                 <button
                   class={styles.swatch}
                   style={{ background: hexOf(row.color) }}
-                  title="色を変更"
+                  title="Change colour"
                   onClick={() => setOpenPalette(openPalette === row.id ? null : row.id)}
                 />
 
@@ -198,7 +198,7 @@ function Plugin(): JSX.Element {
                   />
                 </div>
 
-                <span class={styles.count} title="この行のアイテム数">
+                <span class={styles.count} title="Items in this row">
                   {row.count > 0 ? row.count : ''}
                 </span>
 
@@ -246,9 +246,9 @@ function Plugin(): JSX.Element {
       <Status subscriptions={state.subscriptions} />
       <VerticalSpace space="small" />
       <Muted>
-        付箋は FigJam の素の機能で作り、行にドラッグして並べてください。行の順序は、キャンバス上で
-        行を上下にドラッグするか、このパネルの ↑↓ / ⠿ で入れ替えます。どれか1行の右端を引っ張ると、
-        その盤面の幅が変わります。盤面はいくつでも作れます。
+        Make stickies with FigJam itself, then drag them into the rows. Reorder rows by
+        dragging them up and down on the canvas, or with ↑↓ / ⠿ here. Drag the right edge of
+        any row to resize the whole board. You can create as many boards as you like.
       </Muted>
       <VerticalSpace space="small" />
     </Container>
@@ -269,7 +269,7 @@ function BoardBar(props: {
         <Dropdown
           options={boards.map((board) => ({
             value: board.id,
-            text: `${board.label}（${board.rowCount}行）`,
+            text: `${board.label} (${board.rowCount} rows)`,
           }))}
           value={active?.id ?? null}
           onValueChange={(value) => emit<SelectBoardHandler>('SELECT_BOARD', value)}
@@ -277,7 +277,7 @@ function BoardBar(props: {
       ) : null}
       <VerticalSpace space="extraSmall" />
       <Textbox
-        placeholder="盤面の名前（キャンバスに見出しが出ます）"
+        placeholder="Board name (shown as a heading on the canvas)"
         value={draft ?? active?.name ?? ''}
         onValueInput={(value: string) => {
           setDraft(value);
@@ -290,12 +290,12 @@ function BoardBar(props: {
         }}
       />
       <VerticalSpace space="extraSmall" />
-      {/* キャンバスの色はドキュメントのデータなので、これは見ている人ごとの
-          設定ではなく盤面ごとの設定。初期値はキャンバス背景から決まる。 */}
+      {/* Canvas colours are document data, so this is a per-board setting rather
+          than a per-viewer one. Seeded from the canvas background. */}
       <SegmentedControl
         options={[
-          { value: 'light', children: 'ライト' },
-          { value: 'dark', children: 'ダーク' },
+          { value: 'light', children: 'Light' },
+          { value: 'dark', children: 'Dark' },
         ]}
         value={theme}
         onValueChange={(value: string) => {
@@ -309,13 +309,13 @@ function BoardBar(props: {
 }
 
 function Status(props: { subscriptions: string[] }): JSX.Element {
-  const ok = props.subscriptions.filter((name) => name.indexOf('失敗') < 0);
+  const ok = props.subscriptions.filter((name) => name.indexOf('failed') < 0);
   return (
     <div class={[styles.status, ok.length === 0 ? styles.statusBad : ''].filter(Boolean).join(' ')}>
       <Muted>
         {ok.length > 0
-          ? `キャンバスの変更を購読中: ${props.subscriptions.join(' / ')}`
-          : `キャンバスの変更を購読できていません: ${props.subscriptions.join(' / ') || '(なし)'}`}
+          ? `Subscribed to canvas changes: ${props.subscriptions.join(' / ')}`
+          : `Not subscribed to canvas changes: ${props.subscriptions.join(' / ') || '(none)'}`}
       </Muted>
     </div>
   );

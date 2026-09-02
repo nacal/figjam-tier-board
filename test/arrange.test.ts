@@ -8,7 +8,7 @@ const LABEL_WIDTH = 300;
 const CONTENT_X = LABEL_WIDTH + PADDING;
 const COLUMNS = 10;
 
-test('盤面を作成すると S/A/B/C/D の5行が隙間なく積まれる', async () => {
+test('creating a board stacks S/A/B/C/D flush', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
 
@@ -17,11 +17,11 @@ test('盤面を作成すると S/A/B/C/D の5行が隙間なく積まれる', as
   assert.deepEqual(rows.map((r) => r.name), ['S', 'A', 'B', 'C', 'D']);
   for (let i = 1; i < rows.length; i++) {
     assert.equal(rows[i].x, rows[0].x);
-    assert.equal(rows[i].y, rows[i - 1].y + rows[i - 1].height, '行の間に隙間はない');
+    assert.equal(rows[i].y, rows[i - 1].y + rows[i - 1].height, 'there is no gap between rows');
   }
 });
 
-test('行はすべて盤面のセクションの子になる', async () => {
+test('every row is a child of the board section', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
 
@@ -29,31 +29,31 @@ test('行はすべて盤面のセクションの子になる', async () => {
   assert.equal(containers.length, 1);
   for (const row of h.rows()) {
     assert.equal(row.parent!.id, containers[0].id);
-    assert.equal(row.x, 0, '位置は盤面からの相対');
+    assert.equal(row.x, 0, 'positions are relative to the board');
   }
 });
 
-test('各行の左端にティア名の色セルが載る', async () => {
+test('every row carries a coloured tier label on its left', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
 
   for (const row of h.rows()) {
     const label = h.label(row);
-    assert.ok(label, 'ラベルがある');
+    assert.ok(label, 'has a tier label');
     assert.equal(h.labelText(row), row.name);
     assert.equal(label.x, 0);
     assert.equal(label.y, 0);
     assert.equal(label.width, LABEL_WIDTH);
     assert.equal(label.height, row.height);
-    assert.equal(label.locked, true, 'キャンバス上で掴めない');
-    assert.notDeepEqual(label.fills, [], '色が付いている');
+    assert.equal(label.locked, true, 'cannot be grabbed on the canvas');
+    assert.notDeepEqual(label.fills, [], 'has a colour');
   }
 
   const colors = h.rows().map((r) => JSON.stringify(h.label(r)!.fills));
   assert.equal(new Set(colors).size, 5);
 });
 
-test('既定の幅には付箋が横に10枚入り、11枚目から折り返す', async () => {
+test('the default width fits ten stickies and wraps at the eleventh', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   const row = h.rows()[0];
@@ -72,15 +72,15 @@ test('既定の幅には付箋が横に10枚入り、11枚目から折り返す'
   assert.equal(secondLine.length, 3);
 
   firstLine.forEach((node, i) => {
-    assert.equal(node.x, CONTENT_X + i * (240 + GAP), `1行目 ${i} 枚目は色セルの右から詰まる`);
+    assert.equal(node.x, CONTENT_X + i * (240 + GAP), `item ${i} on line 1 packs from the right of the tier label`);
   });
 
-  assert.equal(row.height, PADDING * 2 + 240 * 2 + GAP, '2段になったぶん伸びる');
-  assert.equal(h.label(row)!.height, row.height, '色セルも一緒に伸びる');
-  assert.equal(h.rows()[1].y, row.y + row.height, '下の行が押し下げられる');
+  assert.equal(row.height, PADDING * 2 + 240 * 2 + GAP, 'grows by one more line');
+  assert.equal(h.label(row)!.height, row.height, 'the tier label grows with it');
+  assert.equal(h.rows()[1].y, row.y + row.height, 'the row below is pushed down');
 });
 
-test('付箋の順位は落とした位置で決まり、場所が入れ替わる', async () => {
+test('rank comes from where a sticky was dropped, trading places with what was there', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   const row = h.rows()[0];
@@ -91,7 +91,7 @@ test('付箋の順位は落とした位置で決まり、場所が入れ替わ�
   await h.send('ARRANGE_NOW');
   assert.deepEqual(h.items(row).sort((x, y) => x.x - y.x).map((n) => n.name), ['A', 'B', 'C']);
 
-  // C を A と B のあいだへドラッグして落とす
+  // Drag C between A and B.
   c.x = a.x + 130;
   h.settle();
   await h.send('ARRANGE_NOW');
@@ -99,12 +99,12 @@ test('付箋の順位は落とした位置で決まり、場所が入れ替わ�
   assert.deepEqual(
     h.items(row).sort((x, y) => x.x - y.x).map((n) => n.name),
     ['A', 'C', 'B'],
-    'C が B と場所を交代する',
+    'C trades places with B',
   );
   assert.equal(a.x, CONTENT_X);
 });
 
-test('空になった行は既定の高さに戻る', async () => {
+test('an emptied row returns to the default height', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   const row = h.rows()[0];
@@ -126,7 +126,7 @@ test('空になった行は既定の高さに戻る', async () => {
   assert.equal(h.label(row)!.height, 300);
 });
 
-test('行を削除すると中の付箋は盤面の外へ逃げ、隙間は詰まる', async () => {
+test('deleting a row moves its stickies outside the board and closes the gap', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   const container = h.containers()[0];
@@ -140,17 +140,17 @@ test('行を削除すると中の付箋は盤面の外へ逃げ、隙間は詰�
   await h.send('DELETE_ROW', row.id);
 
   assert.equal(h.rows().length, 4);
-  assert.equal(sticky.removed, false, '付箋は消えていない');
-  assert.equal(sticky.parent!.type, 'PAGE', 'どの行にも盤面にも取り込まれていない');
-  assert.ok(h.absolute(sticky).y >= boardBottom, '盤面より下にいる');
+  assert.equal(sticky.removed, false, 'the sticky was not deleted');
+  assert.equal(sticky.parent!.type, 'PAGE', 'adopted by neither a row nor the board');
+  assert.ok(h.absolute(sticky).y >= boardBottom, 'sits below the board');
 
   const left = h.rows();
   for (let i = 1; i < left.length; i++) {
-    assert.equal(left[i].y, left[i - 1].y + left[i - 1].height, '隙間が詰まっている');
+    assert.equal(left[i].y, left[i - 1].y + left[i - 1].height, 'the gaps are closed');
   }
 });
 
-test('並び替えても行の中身は一緒に動く', async () => {
+test('the contents of a row travel with it when reordered', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   const target = h.rows()[0];
@@ -161,11 +161,11 @@ test('並び替えても行の中身は一緒に動く', async () => {
 
   await h.send('MOVE_ROW', target.id, 'down');
 
-  assert.equal(sticky.parent!.id, target.id, '付箋は行に付いたまま');
+  assert.equal(sticky.parent!.id, target.id, 'the sticky stays with its row');
   assert.equal(h.rows()[1].id, target.id);
 });
 
-test('パネルでの並び替えはキャンバスの並びに反映される', async () => {
+test('reordering in the panel is reflected on the canvas', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   const ids = h.rows().map((r) => r.id);
@@ -175,13 +175,13 @@ test('パネルでの並び替えはキャンバスの並びに反映される',
   assert.deepEqual(h.rows().map((r) => r.name), ['D', 'S', 'A', 'B', 'C']);
 });
 
-test('リネームすると色セルの文字も変わる', async () => {
+test('renaming a row updates the letter on its tier label', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   const row = h.rows()[0];
 
-  await h.send('RENAME_ROW', row.id, '神');
+  await h.send('RENAME_ROW', row.id, 'God');
 
-  assert.equal(row.name, '神');
-  assert.equal(h.labelText(row), '神');
+  assert.equal(row.name, 'God');
+  assert.equal(h.labelText(row), 'God');
 });

@@ -1,6 +1,3 @@
-// 行の中身の並べ方。Figma のノードには触らない ── 矩形の並びを受け取って、
-// 矩形の置き場所を返すだけ。ここが正しいことはモックなしで確かめられる。
-
 export interface Box {
   x: number;
   y: number;
@@ -14,36 +11,33 @@ export interface Placement {
 }
 
 export interface RowMetrics {
-  /** 色セルの幅 */
   labelWidth: number;
-  /** 行の内側の余白 */
   padding: number;
-  /** アイテムどうしの間隔 */
   gap: number;
-  /** 行の最小の高さ */
   minHeight: number;
-  /** 上端がこれだけ離れていたら別の段とみなす */
+  /** Items whose top edges are farther apart than this belong to different lines. */
   lineTolerance: number;
 }
 
 export interface RowLayout<T> {
-  /** 読み順に並べ直したアイテム */
+  /** Items in reading order. */
   items: T[];
-  /** items と同じ順の置き場所（行の左上からの相対） */
+  /** Where to put each item, relative to the row's top left. Parallel to `items`. */
   placements: Placement[];
-  /** 中身を収めるのに必要な行の高さ */
   height: number;
 }
 
-// 行の中の読み順。上の段が先、同じ段では左が先。
+// Reading order: upper line first, leftmost first within a line.
 //
-// 中心 x だけで並べてはいけない。折り返すと2段目の左端と1段目の左端が同じ x
-// になり、並べるたびに段が混ざって順序が変わる。順序が変われば位置も変わり、
-// 位置が変われば整列がまた走る ── 2段以上ある行が延々と並び直し続ける。
+// Never order by horizontal centre alone. Once a row wraps, the leftmost item of
+// the second line sits at the same x as the leftmost item of the first, so the
+// lines interleave differently on every pass. A different order means different
+// positions, and different positions trigger another arrange — a wrapped row
+// then reflows forever.
 //
-// 段の判定は上端で行う。整列後は同じ段の上端が揃うため。中心で見ると、文字が
-// 多くて背の高い付箋が同じ段にいるだけで中心がずれ、別の段と判定されて上と
-// 同じ無限ループになる。
+// Lines are detected by top edge, not centre. Items on a line share a top edge
+// once arranged, whereas a tall sticky shifts the centre far enough to be read
+// as its own line, which brings back the same endless reflow.
 export function readingOrder<T extends Box>(items: T[], lineTolerance: number): T[] {
   const byLine = items.slice().sort((a, b) => a.y - b.y);
   const lines: T[][] = [];
@@ -66,7 +60,6 @@ export function readingOrder<T extends Box>(items: T[], lineTolerance: number): 
   return ordered;
 }
 
-// 読み順に読んで、色セルの右から左上に詰める。横幅に収まらない分は折り返す。
 export function layoutRow<T extends Box>(
   items: T[],
   targetWidth: number,
@@ -75,6 +68,7 @@ export function layoutRow<T extends Box>(
   const ordered = readingOrder(items, metrics.lineTolerance);
   const contentWidth = Math.max(targetWidth - metrics.labelWidth - metrics.padding * 2, 1);
 
+  // Break the reading order into lines that fit the content width.
   const lines: T[][] = [];
   let line: T[] = [];
   let lineWidth = 0;
@@ -110,6 +104,7 @@ export function layoutRow<T extends Box>(
     height = Math.max(Math.round(stacked), metrics.minHeight);
   }
 
+  // Pack each line from the right edge of the tier label.
   const placements: Placement[] = [];
   let cursorY = metrics.padding;
   lines.forEach((nodes, index) => {

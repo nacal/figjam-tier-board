@@ -3,7 +3,7 @@ import { test } from 'vitest';
 
 import { ArrangeQueue } from '../../src/domain/queue';
 
-test('的にした行だけを返し、取り出すと空になる', () => {
+test('returns only the marked rows and empties on take', () => {
   const queue = new ArrangeQueue(320);
   queue.markRow('row-1');
   queue.markRow('row-1');
@@ -14,7 +14,7 @@ test('的にした行だけを返し、取り出すと空になる', () => {
   assert.deepEqual(queue.take(), { targets: [], rowDragged: false });
 });
 
-test('全体指定は個別の的より強い', () => {
+test('marking everything wins over individual targets', () => {
   const queue = new ArrangeQueue(320);
   queue.markRow('row-1');
   queue.markAll();
@@ -22,29 +22,29 @@ test('全体指定は個別の的より強い', () => {
   assert.deepEqual(queue.take(), { targets: null, rowDragged: false });
 });
 
-test('待ち時間はいちばん長いものに合わせる', () => {
+test('the delay takes the longest request', () => {
   const queue = new ArrangeQueue(320);
   assert.equal(queue.pendingDelay, 320);
 
   queue.requestDelay(80);
-  assert.equal(queue.pendingDelay, 320, '短い要求では縮めない');
+  assert.equal(queue.pendingDelay, 320, 'a shorter request does not shorten it');
 
   queue.requestDelay(420);
-  assert.equal(queue.pendingDelay, 420, '行のドラッグは長く待つ');
+  assert.equal(queue.pendingDelay, 420, 'a row drag waits longer');
 });
 
-test('取り出すと待ち時間も既定に戻る', () => {
+test('taking resets the delay to the default', () => {
   const queue = new ArrangeQueue(320);
   queue.requestDelay(420);
   queue.take();
   assert.equal(queue.pendingDelay, 320);
 });
 
-test('行が動かされたことを持ち越す', () => {
+test('carries over that a row was moved', () => {
   const queue = new ArrangeQueue(320);
   queue.markRow('row-1');
   queue.markRowDragged();
 
   assert.equal(queue.take().rowDragged, true);
-  assert.equal(queue.take().rowDragged, false, '一度取り出したら下がる');
+  assert.equal(queue.take().rowDragged, false, 'clears once taken');
 });

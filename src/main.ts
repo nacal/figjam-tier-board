@@ -36,16 +36,15 @@ import {
   themeForBackground,
 } from './domain/theme';
 
-// FigJam Tier表プラグイン
+// Tier Board — a FigJam plugin.
 //
-// 行（ティア）は SectionNode で表現する。セクションは幾何的に内包したノードを
-// 自動的に子にするため、付箋の所属判定は parent を見るだけで済む。
-// 行の順序はキャンバス上の y 座標を唯一の正とし、順序リストは保存しない。
-// 行の中の順位は付箋の中心 x を唯一の正とし、左から詰めて整列する。
+// A board is a section and so is every tier row; rows live inside the board's
+// section, so dragging the board moves the whole table. Sections adopt whatever
+// overlaps them, which makes membership a question of `parent` alone and treats
+// plugin-made and hand-made stickies alike.
 //
-// 各行の左端には、ティア名を表示する色付きのセル（ShapeWithText）を子として
-// 置く。これはランキング対象ではないので整列からは除外し、ロックして
-// キャンバス上で掴めないようにしてある。
+// Row order and the order within a row are both read off the canvas; nothing is
+// stored. Whatever the user dragged into place is the truth.
 
 const TIER_FLAG_KEY = 'figjamTierRow';
 const TIER_COLOR_KEY = 'figjamTierColor';
@@ -53,28 +52,27 @@ const TIER_WIDTH_KEY = 'figjamTierWidth';
 const TIER_BOARD_KEY = 'figjamTierBoard';
 const TIER_BOARD_NAME_KEY = 'figjamTierBoardName';
 const TIER_TITLE_KEY = 'figjamTierTitle';
-// 盤面をまるごと包むセクション。これを掴めば表ごと動かせる。
+// The section that wraps a whole board; grabbing it moves the table.
 const BOARD_FLAG_KEY = 'figjamTierBoardSection';
-// 盤面の配色。ライト/ダークを盤面ごとに持つ。
 const TIER_THEME_KEY = 'figjamTierTheme';
-// 付箋が最後にいた行。行から出ていった付箋の元の行を知るために使う。
+// The row a sticky last belonged to, so a sticky that leaves can be traced back.
 const ITEM_HOME_KEY = 'figjamTierHome';
 const TIER_LABEL_KEY = 'figjamTierLabel';
 const AUTO_ARRANGE_KEY = 'autoArrange';
 
 const ITEM_PADDING = 24;
 const ITEM_GAP = 24;
-const ITEM_WIDTH = 240; // FigJam の付箋の既定幅
-// 上端がこれだけ離れていたら別の段とみなす（付箋の高さの半分）。
+const ITEM_WIDTH = 240; // default FigJam sticky width
+// Half a sticky: top edges farther apart than this are on different lines.
 const LINE_TOLERANCE = 120;
 
 const DEFAULT_COLUMNS = 10;
 
 const LABEL_WIDTH = 300;
 const ROW_HEIGHT = 300;
-// 行同士は隙間なく積む。tiermaker と同じ見た目にするため。
+// Rows stack flush, as on tiermaker.
 const ROW_GAP = 0;
-// 既定幅は 240px の付箋がちょうど 10 枚入る値。
+// Wide enough for exactly ten 240px stickies.
 const ROW_WIDTH =
   LABEL_WIDTH + ITEM_PADDING * 2 + ITEM_WIDTH * DEFAULT_COLUMNS + ITEM_GAP * (DEFAULT_COLUMNS - 1);
 const BOARD_MARGIN = 160;
@@ -86,19 +84,16 @@ const ROW_METRICS: RowMetrics = {
   lineTolerance: LINE_TOLERANCE,
 };
 
-// 行を削除したとき、中身を盤面の下へ逃がす距離。
 const RESCUE_MARGIN = 80;
-// 盤面の名前を出す見出しの大きさと、いちばん上の行との間隔。
 const TITLE_FONT_SIZE = 72;
 const TITLE_GAP = 32;
 
 
 
-// ドラッグ中に整列が割り込むと掴んでいる付箋が飛ぶので、変更が落ち着いてから走らせる。
+// Arranging mid-drag yanks the sticky out of the hand, so wait for things to settle.
 const ARRANGE_DEBOUNCE_MS = 320;
-// 行を掴んで動かしているあいだに並べ替えが割り込むと、掴んでいる行の下で
-// 順番が入れ替わって手に負えなくなる。付箋より長く待って、手を離してから
-// 並べ替える。
+// Reordering while a row is still held shuffles the other rows underneath it and
+// gets out of hand, so rows wait longer than stickies do.
 const ROW_SETTLE_MS = 420;
 
 const DEFAULT_TIERS: Array<{ name: string; color: string }> = [
@@ -115,27 +110,25 @@ let autoArrange = true;
 let activeBoardId: string | null = null;
 let arrangeTimer: ReturnType<typeof setTimeout> | null = null;
 
-// 次の整列で触る行。触っていない行の中身まで並び直さないための的。
 const queue = new ArrangeQueue(ARRANGE_DEBOUNCE_MS);
-// 前回の整列時点で、どの付箋がどの行にいたか。付箋が行から出ていったとき、
-// 出ていった先の情報だけでは元の行が分からないので覚えておく。
-// 消えた付箋のぶんだけメモリに持つ。生きている付箋は plugin data 側が正。
+// Which row each sticky was in. Only the deleted ones need to be held in memory;
+// for live stickies the plugin data on the node itself is the truth.
 let itemHome: { [nodeId: string]: string } = {};
-// キャンバスの変更をどの経路で購読できたか。パネルに出して切り分けに使う。
+// Which change channels were subscribed. Surfaced in the panel to triage silence.
 let subscriptions: string[] = [];
-// 整列が最後に書き込んだ位置と大きさ。整列そのものが nodechange を起こすので、
-// その反響と人の操作を見分けるために使う。時間で無視する窓にすると、整列の
-// 直後に動かした付箋がまるごと取りこぼされる。
+// What the last arrange wrote. Arranging itself emits changes, and telling those
+// echoes apart from a person's edit by value beats ignoring a window of time —
+// a window drops every sticky moved inside it.
 let written: { [nodeId: string]: string } = {};
 
 function isTierRow(node: BaseNode): node is SectionNode {
   return node.type === 'SECTION' && node.getPluginData(TIER_FLAG_KEY) === '1';
 }
 
-// 色セルは持ち主の行 ID を持つ。行を別の行に重ねると、セクションが相手の
-// 中身を取り込んでしまう（色セルも付箋も）。持ち主が分からないと、盗られた
-// 色セルをその行のものと見なしてしまい、盗られた側は色セルを作り直す
-// ── 同じ名前の行が2つに見える。
+// A tier label carries the id of the row that owns it. Dropping one row onto
+// another makes the dragged section swallow the other's contents, labels included.
+// Without an owner the stolen label passes as the thief's own, the robbed row
+// builds a replacement, and two rows end up showing the same letter.
 function isTierLabel(node: SceneNode): node is ShapeWithTextNode {
   return node.type === 'SHAPE_WITH_TEXT' && node.getPluginData(TIER_LABEL_KEY) !== '';
 }
@@ -152,7 +145,7 @@ function allSections(): SectionNode[] {
   return figma.currentPage.findAllWithCriteria({ types: ['SECTION'] });
 }
 
-// ページ座標。盤面のセクションの中にいる行や付箋は、親からの相対で持っている。
+// Position on the page: rows and stickies inside a board hold parent-relative coordinates.
 function pagePosition(node: SceneNode): { x: number; y: number } {
   let x = node.x;
   let y = node.y;
@@ -187,7 +180,7 @@ function makeContainer(
   container.setPluginData(BOARD_FLAG_KEY, '1');
   container.setPluginData(TIER_BOARD_KEY, id);
   container.setPluginData(TIER_THEME_KEY, theme);
-  container.name = 'Tier表';
+  container.name = 'Tier Board';
   container.resizeWithoutConstraints(Math.max(width, 1), Math.max(height, 1));
   container.x = x;
   container.y = y;
@@ -196,15 +189,15 @@ function makeContainer(
   return container;
 }
 
-// 盤面の配色。持っていない盤面（配色を持たせる前に作られたもの）は既定のまま。
-// 開いた途端に色が変わるのは避ける。
+// Boards created before palettes existed keep the default rather than being
+// recoloured the moment the plugin opens.
 function boardThemeOf(container: SectionNode): BoardTheme {
   return parseTheme(container.getPluginData(TIER_THEME_KEY), DEFAULT_BOARD_THEME);
 }
 
-// このページのキャンバス背景に合う配色。エディタのテーマ設定ではなく、実際に
-// 画面に映っている背景を見る。テーマは main スレッドからは読めないし、背景を
-// 手で変えている場合もそちらに合うため。
+// Seeded from the canvas background rather than the editor theme: the main thread
+// cannot read the theme at all, and a hand-painted background is what is actually
+// on screen.
 function themeForCanvas(): BoardTheme {
   for (const paint of figma.currentPage.backgrounds) {
     if (paint.type === 'SOLID') {
@@ -214,17 +207,17 @@ function themeForCanvas(): BoardTheme {
   return DEFAULT_BOARD_THEME;
 }
 
-// 盤面のセクションに入っていないティア行を拾う。
+// Collects tier rows that are not inside a board section.
 //
-// 行だけをキャンバスへ持ち出せてしまうと表が壊れるので、元の盤面が残っていれば
-// そこへ戻す。行はロックできない ── ロックは子にも効くので、行をロックすると
-// 中の付箋を掴めなくなり、並べる操作そのものができなくなる。
+// Carrying a single row off breaks the table, so a row goes back to its board if
+// that board still exists. Rows cannot be locked: `locked` applies to children too,
+// so locking a row would make its stickies unpickable and kill the whole point.
 //
-// 戻すときの高さは落とした位置のまま。行の順序はキャンバス上の並びが正なので、
-// 行を上下へドラッグすれば、そのまま並べ替えになる。
+// A returning row keeps the height it was dropped at, which is what turns dragging
+// a row up or down into a reorder.
 //
-// 元の盤面が無い行（盤面を包む前のバージョンで作られた表）は、新しく器を作って
-// まとめて包む。
+// Rows with no board left — tables built before boards were wrapped — get a new
+// container built around them.
 function wrapLooseRows(): void {
   const containers: { [id: string]: SectionNode } = {};
   for (const section of allSections()) {
@@ -254,7 +247,7 @@ function wrapLooseRows(): void {
     const pos = pagePosition(row);
     container.appendChild(row);
     row.x = 0;
-    // 落とした高さを保つ。ここで順番が決まる。
+    // Keep the dropped height; the order comes from it.
     row.y = pos.y - container.y;
     if (returned.indexOf(container) < 0) {
       returned.push(container);
@@ -270,8 +263,8 @@ function wrapLooseRows(): void {
 
   const grouped: { [id: string]: SectionNode[] } = {};
   const order: string[] = [];
-  // 盤面 ID を持たない行は、複数盤面に対応する前に作られたもの。当時は
-  // ページにひとつしか作れなかったので、まとめてひとつの盤面として扱う。
+  // Rows with no board id predate multi-board support, when a page could only hold
+  // one board, so they all belong to the same one.
   let legacyId = '';
   for (const row of orphans) {
     let id = row.getPluginData(TIER_BOARD_KEY);
@@ -312,7 +305,7 @@ function wrapLooseRows(): void {
       row.x = pos.x - container.x;
       row.y = pos.y - container.y;
     }
-    // 盤面の見出しも一緒に動くよう、中へ入れる
+    // Pull the heading in too, so it travels with the board.
     for (const node of figma.currentPage.children.slice()) {
       if (node.type === 'TEXT' && node.getPluginData(TIER_TITLE_KEY) === id) {
         container.appendChild(node);
@@ -339,11 +332,11 @@ function isTitle(node: SceneNode): boolean {
   return node.type === 'TEXT' && node.getPluginData(TIER_TITLE_KEY) === '1';
 }
 
-// 盤面には落ちたが、どの行にも入らなかったアイテムを、重なっている行へ引き取る。
+// Hands items that landed on the board but in no row to the row they overlap.
 //
-// FigJam がセクションの入れ子のうち外側（盤面）に付けることがある。プラグイン
-// API で座標を動かしてもセクションは取り込まないので、どちらに付くかはエディタ
-// 側の挙動でしか決まらない。どちらでも動くようにしておく。
+// FigJam may attach a drop to the outer section instead of the inner row, and the
+// plugin API never triggers adoption at all (moving a node by API leaves its
+// parent alone), so which one wins is only decided in the editor. Handle both.
 function adoptStrays(board: Board): SectionNode[] {
   const touched: SectionNode[] = [];
   if (board.rows.length === 0) {
@@ -372,8 +365,6 @@ function adoptStrays(board: Board): SectionNode[] {
   return touched;
 }
 
-// 行の順番はキャンバス上の並びを正とする。中心で比べる ── 上端で比べると、
-// 行の高さぶん以上動かさないと入れ替わらない。
 function rowsOfContainer(container: SectionNode): SectionNode[] {
   const rows: SectionNode[] = [];
   for (const child of container.children) {
@@ -384,7 +375,7 @@ function rowsOfContainer(container: SectionNode): SectionNode[] {
   return byVerticalCenter(rows);
 }
 
-// 盤面ごとのまとまり。並びは、上にある盤面から。
+// Boards on this page, topmost first.
 function getBoards(): Board[] {
   wrapLooseRows();
   const containers: SectionNode[] = [];
@@ -398,11 +389,11 @@ function getBoards(): Board[] {
     const id = container.getPluginData(TIER_BOARD_KEY);
     const rows = rowsOfContainer(container);
     for (const row of rows) {
-      // 別の盤面へドラッグされた行は、移した先の盤面のものになる
+      // A row dragged into another board belongs to that board now.
       if (row.getPluginData(TIER_BOARD_KEY) !== id) {
         row.setPluginData(TIER_BOARD_KEY, id);
       }
-      // 持ち主を持たせる前に作られた色セルは、今いる行のものとして扱う
+      // Labels from before ownership existed belong to whichever row holds them.
       for (const child of row.children) {
         if (child.type === 'SHAPE_WITH_TEXT' && child.getPluginData(TIER_LABEL_KEY) === '1') {
           child.setPluginData(TIER_LABEL_KEY, row.id);
@@ -413,14 +404,14 @@ function getBoards(): Board[] {
   });
 }
 
-// 盤面の名前は器に持たせる。行に持たせると、行を別の盤面へ移したときに
-// 名前まで付いていってしまう。
+// The name lives on the container. On a row it would follow that row into another
+// board.
 function boardName(board: Board): string {
   const stored = board.container.getPluginData(TIER_BOARD_NAME_KEY);
   if (stored !== '') {
     return stored;
   }
-  // 器に名前を持たせる前のバージョンで付けた名前を拾う
+  // Recover a name set before it moved to the container.
   for (const row of board.rows) {
     const name = row.getPluginData(TIER_BOARD_NAME_KEY);
     if (name !== '') {
@@ -431,9 +422,9 @@ function boardName(board: Board): string {
   return '';
 }
 
-// 盤面の名前はキャンバス上にも見出しとして出す。パネルの中だけに持っていても
-// 一緒に見ている人には見えないため。見出しは盤面のセクションの子にしてあるので
-// 表ごと動かせば一緒に動く。名前が空のときは見出しを置かない。
+// The name also appears on the canvas as a heading, because a name kept only in
+// the panel is invisible to everyone else looking at the board. The heading is a
+// child of the board section, so it travels with the table.
 function findTitle(container: SectionNode): TextNode | null {
   for (const child of container.children) {
     if (child.type === 'TEXT' && child.getPluginData(TIER_TITLE_KEY) === '1') {
@@ -455,7 +446,6 @@ function findBoard(boards: Board[], id: string | null): Board | null {
   return null;
 }
 
-// パネルが操作している盤面。指定が無い／消えていたら、いちばん上の盤面。
 function activeBoard(boards: Board[]): Board | null {
   const found = findBoard(boards, activeBoardId);
   if (found !== null) {
@@ -484,9 +474,9 @@ function findLabel(row: SectionNode): ShapeWithTextNode | null {
   return null;
 }
 
-// 他の行に盗られた付箋を元の行へ返す。行が動かされた直後だけ呼ぶ。
-// 人が付箋そのものを動かしたときは返してはいけない ── そのときは行は
-// 動いていないので、この関数は呼ばれない。
+// Sends stickies stolen by another row back home. Only called right after a row
+// was moved; when a person moves a sticky themselves no row moved, so this never
+// runs and their choice stands.
 function repatriateItems(board: Board): SectionNode[] {
   const touched: SectionNode[] = [];
   for (const row of board.rows) {
@@ -516,7 +506,7 @@ function repatriateItems(board: Board): SectionNode[] {
   return touched;
 }
 
-// 他の行に盗られた色セルを持ち主へ返す。持ち主が消えていれば捨てる。
+// Returns stolen tier labels to their owner, or drops them if the owner is gone.
 function repatriateLabels(board: Board): SectionNode[] {
   const touched: SectionNode[] = [];
   for (const row of board.rows) {
@@ -546,11 +536,10 @@ function repatriateLabels(board: Board): SectionNode[] {
   return touched;
 }
 
-// ランキング対象。左端のティア名セルは含めない。
+// The things being ranked. Rows, boards and headings are excluded: dropping a row
 //
-// 行や盤面のセクションも除く。行を別の行の上にドロップすると FigJam が行を
-// 行の子にすることがあり、そのまま数えると行そのものを付箋として左寄せに
-// 詰めはじめる。
+// onto another makes FigJam nest it, and counting it would pack a whole row into
+// a 240px slot as if it were a sticky.
 function itemsOf(row: SectionNode): SceneNode[] {
   const items: SceneNode[] = [];
   for (const child of row.children) {
@@ -562,8 +551,8 @@ function itemsOf(row: SectionNode): SceneNode[] {
   return items;
 }
 
-// 行そのものの見た目（暗い中身の面と境界線）。整列のたびに当て直すので、
-// 色セルが無かった頃に作られた盤面も、次の整列で新しい見た目に移行する。
+// Reapplied on every arrange, so boards built before the current look migrate to
+// it by themselves.
 function applyRowChrome(row: SectionNode, theme: BoardTheme): void {
   const palette = paletteFor(theme);
   const content = hexToRgb(palette.content);
@@ -596,7 +585,7 @@ async function ensureLabel(row: SectionNode): Promise<ShapeWithTextNode> {
   row.appendChild(label);
   label.x = 0;
   label.y = 0;
-  // キャンバス上で掴めるとランキング対象と紛らわしいので固定する。
+  // Locked, or it would look like something to rank.
   label.locked = true;
   await writeLabelText(label, row.name);
   applyColor(row, row.getPluginData(TIER_COLOR_KEY) || FALLBACK_COLOR_KEY);
@@ -643,11 +632,10 @@ async function createRow(
   return row;
 }
 
-// 与えられた順序で、盤面のセクションの中に上から詰め直す。行の高さは整列や
-// ユーザー操作で変わっているので、実際の高さを積み上げて配置する。
+// Restacks rows inside the board section in the given order.
 //
-// 位置はすべて盤面のセクションからの相対。盤面そのものの場所には触らないので、
-// 並べ替えても表は動かないし、ユーザーが表を掴んで動かした場所も保たれる。
+// Every position is relative to the board section and the board itself is never
+// moved, so reordering leaves the table where it is, including where a user dragged it.
 function relayout(container: SectionNode, rows: SectionNode[]): void {
   const title = findTitle(container);
   const titleBlock = title !== null ? title.height + TITLE_GAP : 0;
@@ -666,8 +654,8 @@ function relayout(container: SectionNode, rows: SectionNode[]): void {
   }
   neededHeight = Math.max(neededHeight, 1);
 
-  // 広げるのは配置の前、縮めるのは配置の後。先に縮めると、はみ出した行が
-  // 盤面のセクションから抜けてしまう。
+  // Grow before placing, shrink after. Shrinking first drops whatever now sticks out
+  // of the section.
   const grownWidth = Math.max(container.width, neededWidth);
   const grownHeight = Math.max(container.height, neededHeight);
   if (grownWidth !== container.width || grownHeight !== container.height) {
@@ -700,8 +688,6 @@ function relayout(container: SectionNode, rows: SectionNode[]): void {
   remember(container);
 }
 
-// 盤面の幅。ユーザーがどれか1行の幅を変えたら、それを全行に広げる。
-// 「変えた行」は、前回書き込んでおいた幅と実際の幅が食い違う行として見つける。
 function boardWidth(rows: SectionNode[]): number {
   return resolveBoardWidth(
     rows.map((row) => {
@@ -712,17 +698,16 @@ function boardWidth(rows: SectionNode[]): number {
   );
 }
 
-// 行の中身を左上から詰め直す。順位は読み順（上の段が先、同じ段では左が先）
-// なので、ドラッグして落とした位置がそのまま順位になり、落とした先の付箋と
-// 場所が入れ替わる。横幅に収まらない分は折り返し、必要なら行の高さを伸ばす。
+// Packs a row from the top left in reading order, so where a sticky was dropped is
+// its rank and it trades places with whatever it landed on.
 async function arrangeRow(row: SectionNode, targetWidth: number, theme: BoardTheme): Promise<void> {
   applyRowChrome(row, theme);
   const label = await ensureLabel(row);
   const layout = layoutRow(itemsOf(row), targetWidth, ROW_METRICS);
   const needed = layout.height;
 
-  // 広げるのは配置の前、縮めるのは配置の後。先に縮めると、セクションの外に
-  // はみ出した付箋やラベルが行から抜けてしまう。
+  // Grow before placing, shrink after. Shrinking first drops stickies and labels
+  // that stick out of the section.
   const grownWidth = Math.max(row.width, targetWidth);
   const grownHeight = Math.max(row.height, needed);
   if (grownWidth !== row.width || grownHeight !== row.height) {
@@ -736,8 +721,8 @@ async function arrangeRow(row: SectionNode, targetWidth: number, theme: BoardThe
   layout.items.forEach((item, index) => {
     item.x = layout.placements[index].x;
     item.y = layout.placements[index].y;
-    // 所属はノード自身にも書く。メモリだけに持つと、プラグインを開き直した
-    // 直後に「付箋が出ていった元の行」が分からず、穴が詰まらない。
+    // Written to the node as well: held only in memory, the row a sticky came from is
+    // unknown right after the plugin reopens and the gap it left never closes.
     itemHome[item.id] = row.id;
     if (item.getPluginData(ITEM_HOME_KEY) !== row.id) {
       item.setPluginData(ITEM_HOME_KEY, row.id);
@@ -753,14 +738,13 @@ async function arrangeRow(row: SectionNode, targetWidth: number, theme: BoardThe
   remember(row);
 }
 
-// 盤面ごとに幅を決めて整列し、その盤面のなかだけで詰め直す。
-// 幅も並びも盤面をまたがない。
+// Arranges each board on its own; neither width nor order crosses boards.
 //
-// targets が null なら全部、そうでなければその行だけを並べ直す。触っていない
-// 行の中身まで並び直すと、別の行を触っただけで順位が勝手に組み替わって見える。
-// ただし次の場合は、指定が無くてもその盤面の行を全部並べ直す:
-//   - 盤面の幅が変わった（全行を同じ幅に揃える必要がある）
-//   - 色セルを持たない行がある（古い盤面の移行。中身の置き場所も変わる）
+// A null `targets` means every row. Rearranging untouched rows makes ranks look
+// like they reshuffle themselves whenever a different row is touched. Two cases
+// still take the whole board:
+//   - the width changed, and every row has to match it
+//   - some row has no tier label yet, which also moves its contents
 async function arrangeBoards(targets: string[] | null, rowDragged: boolean): Promise<void> {
   for (const board of getBoards()) {
     const theme = boardThemeOf(board.container);
@@ -800,16 +784,16 @@ async function runArrange(): Promise<void> {
   postRows();
 }
 
-// 親も入れる。行はどれも同じ幅・同じ高さで縦に並んでいるので、位置と大きさ
-// だけだと「A の中の (324,24)」と「S の中の (324,24)」が同じ印になる。
-// 真上へ1行ぶんドラッグした付箋が自分の書き込みの反響と区別できなくなり、
-// 人が動かしたのに整列が走らない。
-// 消えたノードは RemovedNode で届く。生きているノードだけを取り出す。
+// Includes the parent. Rows are stacked at identical sizes, so position and size
+// alone give (324,24)-in-A and (324,24)-in-S the same stamp; a sticky dragged
+// exactly one row straight up would then pass as this plugin's own echo and never
+// be rearranged.
+// Deleted nodes arrive as RemovedNode.
 //
-// `'removed' in node` で判定してはいけない。BaseNodeMixin にも
-// `readonly removed: boolean` があるので、生きているノードでも true になり、
-// すべての変更が「消えたノード」扱いになって整列が一切走らなくなる。
-// 見るのはプロパティの有無ではなく値。
+// Never test with `'removed' in node`: BaseNodeMixin declares
+// `readonly removed: boolean` too, so it is true for live nodes as well, every
+// change is taken for a deletion and no arrange ever runs. Read the value, not
+// the presence of the property.
 function liveNode(node: SceneNode | RemovedNode): SceneNode | null {
   if (node.removed) {
     return null;
@@ -832,7 +816,6 @@ function markRow(rowId: string | null): void {
   }
 }
 
-// ノードが今いる行。付箋そのものでも、行そのものでも辿れる。
 function rowIdOf(node: BaseNode): string | null {
   let cursor: BaseNode | null = node;
   while (cursor !== null) {
@@ -844,8 +827,6 @@ function rowIdOf(node: BaseNode): string | null {
   return null;
 }
 
-// 待ち時間はいちばん長いものに合わせる。行が動いているあいだに付箋の変更が
-// 混ざっても、行の並べ替えが割り込まないようにする。
 function scheduleArrange(delay: number): void {
   queue.requestDelay(delay);
   if (arrangeTimer !== null) {
@@ -871,7 +852,7 @@ function postRows(): void {
     boards: boards.map((board, index) => ({
       id: board.id,
       name: boardName(board),
-      label: boardName(board) || `盤面 ${index + 1}`,
+      label: boardName(board) || `Board ${index + 1}`,
       rowCount: board.rows.length,
     })),
     activeBoardId,
@@ -892,8 +873,8 @@ async function getRowById(id: string): Promise<SectionNode | null> {
   return node;
 }
 
-// 盤面の置き場所。既存コンテンツがあればその下に置く。ビューポート中央に置くと
-// 既存の付箋の上に行が重なり、セクションがそれを自動的に子にしてしまうため。
+// Placed below existing content. At the viewport centre the rows would land on top
+// of existing stickies and the sections would adopt them.
 function boardOrigin(totalHeight: number): { x: number; y: number } {
   const siblings = figma.currentPage.children;
   if (siblings.length === 0) {
@@ -912,7 +893,6 @@ function boardOrigin(totalHeight: number): { x: number; y: number } {
   return { x: Math.round(minX), y: Math.round(maxY + BOARD_MARGIN) };
 }
 
-// 盤面はいくつでも作れる。新しい盤面は既存のコンテンツの下に置く。
 async function createBoard(): Promise<void> {
   const totalHeight = DEFAULT_TIERS.length * ROW_HEIGHT + (DEFAULT_TIERS.length - 1) * ROW_GAP;
   const origin = boardOrigin(totalHeight);
@@ -965,9 +945,9 @@ function rescueDropY(): number {
   return (isFinite(bottom) ? bottom : 0) + RESCUE_MARGIN;
 }
 
-// セクションを消すと中の子ごと消えるため、先に中身を外へ逃がす。行き先は
-// 盤面のセクションの外（ページ直下）。中に残すと、詰め直した行がそれを踏んで
-// 自動的に子にしてしまう。
+// Removing a section takes its children with it, so the contents move out first —
+// onto the page, not inside the board, where a restacked row would land on them
+// and adopt them.
 function rescueItems(row: SectionNode, dropY: number): number {
   const items = itemsOf(row);
   for (const item of items) {
@@ -992,13 +972,13 @@ async function deleteRow(id: string): Promise<void> {
   }
   const left = board.rows.filter((candidate) => candidate.id !== id);
   if (left.length === 0) {
-    // 行が一枚も無い盤面は器ごと片付ける。見出しも一緒に消える。
+    // A board with no rows left goes away entirely, heading included.
     board.container.remove();
   } else {
     relayout(board.container, left);
   }
   if (rescued > 0) {
-    figma.notify(`${rescued} 個のアイテムをキャンバスの下に移しました`);
+    figma.notify(`Moved ${rescued} item(s) below the board`);
   }
 }
 
@@ -1025,7 +1005,6 @@ async function setRowColor(id: string, colorKey: string): Promise<void> {
   applyColor(row, colorKey);
 }
 
-// 配列上で順序を入れ替えたあと、その盤面の行の y を詰め直す。
 async function moveRow(id: string, direction: 'up' | 'down'): Promise<void> {
   const board = boardOfRow(getBoards(), id);
   if (board === null) {
@@ -1039,9 +1018,7 @@ async function moveRow(id: string, direction: 'up' | 'down'): Promise<void> {
   relayout(board.container, swapNeighbour(rows, index, direction));
 }
 
-// パネル上でドラッグ&ドロップされた順序をそのまま反映する。対象は渡された
-// 行が属する盤面だけ。パネルが把握していない行がその盤面にあってもいいように、
-// 渡された ID の順に並べ、残りは現在の順序のまま後ろへ回す。
+// Applies the order the panel dragged into place, within that row's board only.
 function reorderRows(ids: string[]): void {
   if (ids.length === 0) {
     return;
@@ -1064,7 +1041,7 @@ async function setBoardName(boardId: string, rawName: string): Promise<void> {
   for (const row of board.rows) {
     row.setPluginData(TIER_BOARD_NAME_KEY, '');
   }
-  board.container.name = name !== '' ? name : 'Tier表';
+  board.container.name = name !== '' ? name : 'Tier Board';
 
   const existing = findTitle(board.container);
   if (name === '') {
@@ -1093,8 +1070,8 @@ async function setBoardName(boardId: string, rawName: string): Promise<void> {
   relayout(board.container, board.rows);
 }
 
-// 配色の切り替え。キャンバスの色はドキュメントのデータなので、これは
-// 見ている人ごとの設定ではなく盤面ごとの設定（全員に反映される）。
+// Canvas colours are document data, so this is a per-board setting that everyone
+// sees, not a per-viewer preference.
 function setBoardTheme(boardId: string, theme: BoardTheme): void {
   const board = findBoard(getBoards(), boardId);
   if (board === null) {
@@ -1118,8 +1095,8 @@ async function setAutoArrange(enabled: boolean): Promise<void> {
 }
 
 
-// UI からのイベント。名前とペイロードは events.ts で宣言してあるので、
-// 綴り違いも引数の取り違えもコンパイルで落ちる。
+// Event names and payloads are declared in events.ts, so a misspelling or a
+// swapped argument fails to compile.
 function registerUiHandlers(): void {
   const refresh = (): void => {
     postRows();
@@ -1167,11 +1144,9 @@ function registerUiHandlers(): void {
   });
 }
 
-// キャンバス側の操作を拾って整列する。REMOTE（他の参加者の操作）に反応すると
-// 全員が同じ行を奪い合って動かし続けるので、自分の操作だけを見る。
+// Only LOCAL changes are acted on. Reacting to REMOTE would have every
+// collaborator fighting over the same rows.
 //
-// 変更は node を持つものだけを見る。documentchange にはスタイルの変更も
-// 混ざってきて、そちらには node が無い。
 function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): void {
   if (!autoArrange) {
     return;
@@ -1182,21 +1157,20 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
     if (change.origin !== 'LOCAL') {
       continue;
     }
-    // node を持つのはこの3種だけ。スタイルの変更には node が無い。
-    // ここも `'node' in change` で判定しない ── プロパティの有無に頼ると、
-    // 上の removed と同じ形で足をすくわれる。
+    // Only these three carry a node; style changes do not. Testing for the property
+    // with `'node' in change` would trip over the same trap as `removed` above.
     if (change.type !== 'CREATE' && change.type !== 'DELETE' && change.type !== 'PROPERTY_CHANGE') {
       continue;
     }
     const live = liveNode(change.node);
 
-    // 整列が書いた親・位置・大きさのままなら、それは自分の書き込みの反響。
+    // Unchanged from what the arrange wrote means this is its own echo.
     if (live !== null && written[change.id] === stamp(live)) {
       continue;
     }
 
-    // 出ていった先だけでは元の行が分からないので、前回いた行も的に入れる。
-    // これが無いと、付箋を行の外へ出したあと元の行に穴が残る。
+    // The destination alone does not reveal the row a sticky left, so its previous row
+    // is targeted too; without it the gap it left stays open.
     let previous = live !== null ? live.getPluginData(ITEM_HOME_KEY) : '';
     if (previous === '') {
       const remembered = itemHome[change.id];
@@ -1213,8 +1187,8 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
       marked = true;
     }
 
-    // 行そのものが動かされた。落とした位置で順番が決まるので、その盤面の行を
-    // まとめて的にする。並べ替えは手を離してから。
+    // A row itself moved. Its dropped position decides the order, so the whole board
+    // is targeted — after the hand lets go.
     if (live !== null && isTierRow(live)) {
       delay = Math.max(delay, ROW_SETTLE_MS);
       queue.markRowDragged();
@@ -1229,9 +1203,9 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
       marked = true;
     }
 
-    // 行には入らなかったが盤面の中にはいるノード（FigJam が外側のセクションに
-    // 付けた付箋）と、元の行が分からないまま親をまたいだ付箋は、どこの行が
-    // 変わったのか特定できない。その盤面の行をまとめて的にする。
+    // For a node inside the board but in no row, and for a sticky that crossed parents
+    // with no known home, there is no way to tell which row changed, so the whole
+    // board is targeted.
     const reparented = change.type === 'PROPERTY_CHANGE' && change.properties.indexOf('parent') >= 0;
     if (live !== null && (current === null || (previous === '' && reparented))) {
       const container = boardContainerOf(live);
@@ -1250,8 +1224,8 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
   }
 }
 
-// 経路はひとつに賭けない。片方が黙って何も届けなくても整列が止まらないように
-// 両方張る。二重に届いても、的は重複を除くしデバウンスでまとめられる。
+// Both channels are subscribed so that one going silent cannot kill auto-arrange.
+// Duplicate deliveries are harmless: targets dedupe and the debounce coalesces.
 function subscribeToCanvas(): void {
   try {
     figma.currentPage.on('nodechange', (event: NodeChangeEvent) => {
@@ -1259,7 +1233,7 @@ function subscribeToCanvas(): void {
     });
     subscriptions.push('nodechange');
   } catch (error) {
-    subscriptions.push(`nodechange失敗(${String(error)})`);
+    subscriptions.push(`nodechange failed (${String(error)})`);
   }
   try {
     figma.on('documentchange', (event: DocumentChangeEvent) => {
@@ -1267,12 +1241,11 @@ function subscribeToCanvas(): void {
     });
     subscriptions.push('documentchange');
   } catch (error) {
-    subscriptions.push(`documentchange失敗(${String(error)})`);
+    subscriptions.push(`documentchange failed (${String(error)})`);
   }
 }
 
-// キャンバスで盤面の中の何かを選んだら、パネルの操作対象をその盤面に移す。
-// 盤面が複数あるとき、いちいちセレクタを触らずに済む。
+// Following the selection saves reaching for the board selector.
 function boardIdFromSelection(): string | null {
   for (const node of figma.currentPage.selection) {
     let cursor: BaseNode | null = node;
@@ -1301,12 +1274,12 @@ async function restoreSettings(): Promise<void> {
   postRows();
 }
 
-// プラグインのエントリ。create-figma-plugin はこのデフォルトエクスポートを呼ぶ。
+// create-figma-plugin invokes this default export.
 export default function main(): void {
   showUI({ width: 340, height: 560, themeColors: true });
   registerUiHandlers();
-  // 購読は同期で張る。読み込みを待ってから張ると、待っているあいだの操作を
-  // 取りこぼす。
+  // Subscribed synchronously; waiting on anything first would drop the edits made
+  // in the meantime.
   subscribeToCanvas();
   figma.on('selectionchange', handleSelectionChange);
   void restoreSettings();

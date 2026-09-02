@@ -12,13 +12,13 @@ function snapshot(h: Harness, row: FakeNode): string {
     .join(' | ');
 }
 
-test('折り返した行を何度整列しても結果が変わらない', async () => {
+test('arranging a wrapped row repeatedly changes nothing', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
   const row = h.rows()[0];
 
-  // 2段に折り返す枚数
+  // Enough to wrap onto two lines.
   for (let i = 0; i < 13; i++) {
     h.dropIn(row, `item${i}`, CONTENT_X + i * 10, 30);
   }
@@ -28,17 +28,17 @@ test('折り返した行を何度整列しても結果が変わらない', async
 
   for (let round = 0; round < 5; round++) {
     await h.send('ARRANGE_NOW');
-    assert.equal(snapshot(h, row), first, `${round + 2}回目でも同じ`);
+    assert.equal(snapshot(h, row), first, `same on pass ${round + 2}`);
   }
 });
 
-test('折り返した行は読み順（上の段が先、同じ段では左が先）で並ぶ', async () => {
+test('a wrapped row reads upper line first, leftmost first', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
   const row = h.rows()[0];
 
-  // 行の幅からはみ出すと行の外に出てしまうので、重ねて置いてから整列させる
+  // Overflowing the row width would push stickies out, so overlap them and arrange.
   const names = [];
   for (let i = 0; i < 13; i++) {
     names.push(`item${i}`);
@@ -47,14 +47,14 @@ test('折り返した行は読み順（上の段が先、同じ段では左が�
   await h.send('ARRANGE_NOW');
 
   const read = h.items(row).sort((a, b) => a.y - b.y || a.x - b.x).map((n) => n.name);
-  assert.deepEqual(read, names, '落とした左からの順番が保たれる');
+  assert.deepEqual(read, names, 'the left-to-right order it was dropped in is kept');
 
   await h.send('ARRANGE_NOW');
   const again = h.items(row).sort((a, b) => a.y - b.y || a.x - b.x).map((n) => n.name);
-  assert.deepEqual(again, names, '並べ直しても段が混ざらない');
+  assert.deepEqual(again, names, 'lines do not interleave on a second pass');
 });
 
-test('折り返した行を触っても整列が止まらなくならない', async () => {
+test('touching a wrapped row does not start an endless arrange', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
@@ -69,12 +69,12 @@ test('折り返した行を触っても整列が止まらなくならない', as
 
   const settled = snapshot(h, row);
 
-  // 自動整列が自分の書き込みに反応して延々と走り続けないこと
+  // Auto-arrange must not keep reacting to its own writes forever.
   await h.flush(900);
-  assert.equal(snapshot(h, row), settled, '放っておいても動き続けない');
+  assert.equal(snapshot(h, row), settled, 'nothing keeps moving when left alone');
 });
 
-test('2段目の付箋を1段目へドラッグすると、その位置の順位に入る', async () => {
+test('dragging a second-line item onto the first takes the rank of where it landed', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
@@ -86,7 +86,7 @@ test('2段目の付箋を1段目へドラッグすると、その位置の順位
   }
   await h.send('ARRANGE_NOW');
 
-  // 2段目の先頭（item10）を1段目の先頭と2番目のあいだへ
+  // Move the head of line 2 (item10) between the first and second of line 1.
   const moved = items[10];
   moved.x = CONTENT_X + 130;
   moved.y = 24;
@@ -94,11 +94,11 @@ test('2段目の付箋を1段目へドラッグすると、その位置の順位
 
   const read = h.items(row).sort((a, b) => a.y - b.y || a.x - b.x).map((n) => n.name);
   assert.equal(read[0], 'item0');
-  assert.equal(read[1], 'item10', '落とした位置の順位に入る');
+  assert.equal(read[1], 'item10', 'takes the rank of where it was dropped');
   assert.equal(read[2], 'item1');
 });
 
-test('背の高い付箋が混ざっても段の判定が崩れない', async () => {
+test('a tall sticky does not break line detection', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
@@ -109,9 +109,9 @@ test('背の高い付箋が混ざっても段の判定が崩れない', async ()
     items.push(h.dropIn(row, `item${i}`, CONTENT_X + i * 100, 30));
   }
   await h.send('ARRANGE_NOW');
-  assert.equal(h.items(row).length, 13, '13枚とも行の中にいる');
+  assert.equal(h.items(row).length, 13, 'all 13 are inside the row');
 
-  // 文字数の多い付箋は縦に伸びる。同じ段にいても中心の高さがそろわなくなる。
+  // A wordy sticky grows taller, so centres no longer line up within a line.
   for (let i = 0; i < items.length; i += 3) {
     items[i].height = 900;
   }
@@ -122,11 +122,11 @@ test('背の高い付箋が混ざっても段の判定が崩れない', async ()
 
   for (let round = 0; round < 4; round++) {
     await h.send('ARRANGE_NOW');
-    assert.equal(snapshot(h, row), first, '位置が変わらない');
+    assert.equal(snapshot(h, row), first, 'positions are unchanged');
     assert.deepEqual(
       h.items(row).sort((a, b) => a.y - b.y || a.x - b.x).map((n) => n.name),
       order,
-      '順序も変わらない',
+      'the order is unchanged too',
     );
   }
 });

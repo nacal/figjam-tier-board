@@ -4,32 +4,32 @@ import { createHarness } from './harness';
 
 const DEFAULT_WIDTH = 300 + 24 * 2 + 240 * 10 + 24 * 9; // 2964
 
-test('既定の幅は付箋10枚ぶん', async () => {
+test('the default width is ten stickies wide', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   for (const row of h.rows()) {
     assert.equal(row.width, DEFAULT_WIDTH);
   }
-  assert.equal(h.containers()[0].width, DEFAULT_WIDTH, '表の幅も行に合う');
+  assert.equal(h.containers()[0].width, DEFAULT_WIDTH, 'the table width matches the rows');
 });
 
-test('1行の幅を変えると全行が同じ幅になる', async () => {
+test('resizing one row resizes every row', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
 
-  // 真ん中の行の右端をユーザーが引っ張った、という状況
-  const widened = DEFAULT_WIDTH + 528; // 付箋2枚ぶん広げる
+  // As if the user dragged the middle row's right edge.
+  const widened = DEFAULT_WIDTH + 528; // two stickies wider
   h.rows()[2].resizeWithoutConstraints(widened, h.rows()[2].height);
 
   await h.send('ARRANGE_NOW');
 
   for (const row of h.rows()) {
-    assert.equal(row.width, widened, '全行が広がる');
+    assert.equal(row.width, widened, 'every row widens');
   }
-  assert.equal(h.containers()[0].width, widened, '表ごと広がる');
+  assert.equal(h.containers()[0].width, widened, 'the whole table widens');
 });
 
-test('幅を狭めると折り返しの枚数も減る', async () => {
+test('narrowing fits fewer items per line', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   const row = h.rows()[0];
@@ -38,9 +38,9 @@ test('幅を狭めると折り返しの枚数も減る', async () => {
     h.dropIn(row, `item${i}`, 324 + i * 10, 30);
   }
   await h.send('ARRANGE_NOW');
-  assert.equal(row.height, 300, '6枚は1段に収まる');
+  assert.equal(row.height, 300, 'six fit on one line');
 
-  // 付箋4枚ぶんの幅まで狭める
+  // Narrow to four stickies wide.
   const narrow = 300 + 24 * 2 + 240 * 4 + 24 * 3;
   row.resizeWithoutConstraints(narrow, row.height);
   await h.send('ARRANGE_NOW');
@@ -48,11 +48,11 @@ test('幅を狭めると折り返しの枚数も減る', async () => {
   for (const other of h.rows()) {
     assert.equal(other.width, narrow);
   }
-  assert.equal(h.items(row).length, 6, '狭めても付箋は行から抜けない');
-  assert.equal(row.height, 24 * 2 + 240 * 2 + 24, '2段に折り返す');
+  assert.equal(h.items(row).length, 6, 'narrowing does not drop stickies out of the row');
+  assert.equal(row.height, 24 * 2 + 240 * 2 + 24, 'wraps onto two lines');
 });
 
-test('行を追加すると今の盤面の幅で作られる', async () => {
+test('a new row is created at the board current width', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
 

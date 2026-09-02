@@ -1,8 +1,8 @@
 {
-  "name": "figjam-tier",
+  "name": "figjam-tier-board",
   "version": "0.1.0",
   "private": true,
-  "description": "FigJam 上で付箋を並べる Tier 表の行（ティア）を管理するプラグイン",
+  "description": "A FigJam plugin that manages the tier rows of a tier board. The things you rank are plain FigJam stickies.",
   "scripts": {
     "build": "build-figma-plugin --typecheck --minify",
     "watch": "build-figma-plugin --typecheck --watch",
@@ -28,8 +28,8 @@
     "editorType": [
       "figjam"
     ],
-    "id": "figjam-tier-maker",
-    "name": "Tier表",
+    "id": "figjam-tier-board",
+    "name": "Tier Board",
     "main": "src/main.ts",
     "ui": "src/ui.tsx",
     "networkAccess": {

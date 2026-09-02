@@ -1,158 +1,130 @@
-# FigJam Tier表
+# Tier Board
 
-FigJam 上で Tier 表（tiermaker.com のようなランキング表）を作るためのプラグイン。
+A FigJam plugin for building tier boards (ranking tables, like the ones on tiermaker.com).
 
-ランキングの対象は **FigJam の素の付箋**。このプラグインが担当するのは「行（ティア）の枠を用意して管理すること」だけで、付箋の生成・集計は行わない。
+The things you rank are **plain FigJam stickies**. This plugin only manages the rows: it never creates stickies for you and never aggregates anything.
 
-## できること
+FigJam only — `editorType` is `["figjam"]`, and the plugin cannot create stickies in a Figma design file anyway.
 
-| 機能 | 内容 |
+## What it does
+
+| | |
 | --- | --- |
-| 盤面作成 | S / A / B / C / D の 5 行を生成。1 ページにいくつでも作れる |
-| 表ごと移動 | 盤面はひとつのセクション。掴んで動かせば中身ごと動く。行だけを持ち出しても元に戻る |
-| 行の追加 | 末尾に新しい行を追加 |
-| 行の削除 | 行を削除。中の付箋は消さずキャンバスに残す |
-| リネーム | 行の名前を変更 |
-| 色変更 | 行の色をプリセットから選択 |
-| 並び替え | 行の順序を入れ替え（キャンバス上で行を上下にドラッグ、またはパネルの ↑↓ / ⠿） |
-| 左寄せ整列 | 行の中の付箋を左上から詰めて並べる。ドラッグして落とした位置で順位が決まる |
-| 幅の変更 | どれか1行の右端を引っ張ると、その盤面の幅が変わる |
-| 盤面の名前 | 盤面に名前を付ける。キャンバスにも見出しが出る |
-| 配色 | ライト / ダーク。初期値はキャンバス背景の明暗から決まる |
+| Create board | Lays out five rows, S / A / B / C / D. Any number of boards per page |
+| Move the table | A board is one section; grab it and the whole table moves |
+| Add / delete rows | Deleting a row keeps its stickies, moving them onto the canvas |
+| Rename | Rename a row |
+| Colour | Pick a row colour from a preset list |
+| Reorder | Drag a row up or down on the canvas, or use ↑↓ / ⠿ in the panel |
+| Pack left | Items in a row pack to the top left; where you drop one is its rank |
+| Resize | Drag the right edge of any row to resize the whole board |
+| Board name | Name a board; the name also appears as a heading on the canvas |
+| Palette | Light or dark, seeded from the lightness of the canvas background |
 
-## 設計
+## Design notes
 
-### 盤面と行
+Most of these are things that only became clear after being wrong about them.
 
-- 盤面も行も `SectionNode`。行は盤面のセクションの子として入れてあるので、**盤面のセクションを掴めば表ごと動かせる**
-- セクションは幾何的に内包したノードを自動的に子にするため、付箋の所属判定が `parent` を見るだけで済む。プラグインが作った付箋か手作りの付箋かも区別しない
-- **取り込みが起きるのはエディタ上のドラッグだけ。** プラグイン API で座標を変えても、セクションはノードを取り込まない（行に完全に重なる位置へ置いても親はページのまま）。つまり入れ子のとき内側の行に付くのか外側の盤面に付くのかは、API では確かめられない
-- そこで**どちらでも動くようにする**。盤面には落ちたがどの行にも入らなかったアイテムは、重なっている行が引き取る。見出しは引き取らない
-- 見分けは plugin data。盤面は `figjamTierBoardSection`、行は `figjamTierRow`。無関係なセクションは対象外
-- 盤面はページにいくつでも置ける。順序・幅・整列・削除はすべて同じ盤面のなかだけで完結し、盤面をまたがない
-- **行だけをキャンバスへ持ち出せてしまうと表が壊れるので、盤面の外に出た行は元の盤面へ戻す。** 行はロックできない ── `locked` は子にも効くので（"An object is locked if `.locked == true` for itself or **any** of its parents"）、行をロックすると中の付箋を掴めなくなり、並べる操作そのものができなくなる
-- 別の盤面へ移された行は、移した先の盤面のものとして扱う。行が持っている盤面 ID を器に合わせて書き直す
-- 元の盤面が見つからない行（盤面を包む前のバージョンで作られた表）だけ、新しく器を作ってまとめて包む
-- パネルが操作する盤面は、キャンバスでの選択に追従する。盤面が 2 つ以上あるときはセレクタも出る
-- 新しい盤面はページ上の既存コンテンツの下に作る。ビューポート中央に作ると既存の付箋の上に行が重なり、セクションがそれを丸ごと子にしてしまう
+### Boards and rows
 
-### 行の順序
+- A board is a `SectionNode` and so is every row; rows live inside the board section, which is what makes the whole table draggable.
+- Sections adopt whatever overlaps them, so membership is a question of `parent` alone, and plugin-made and hand-made stickies are treated alike.
+- **Adoption only happens on an editor drag.** Moving a node through the plugin API never triggers it — a sticky placed exactly over a row keeps the page as its parent. So whether a drop lands in the inner row or the outer board is decided by the editor and cannot be probed from a plugin; both are handled. Items that land on a board but in no row are adopted by the row they overlap.
+- Rows found outside a board section go back to the board they belong to. **Rows cannot be locked**: `locked` applies to children too ("An object is locked if `.locked == true` for itself or **any** of its parents"), so locking a row would make its stickies unpickable and defeat the point.
+- **Dropping one row onto another makes the dragged section swallow the other's contents**, tier label and stickies included. Strays are sent home: a tier label carries its owner row id, and a sticky carries the row it last belonged to. Without owners the stolen label passes as the thief's own, the robbed row builds a replacement, and two rows end up showing the same letter.
+- Stickies only go home **right after a row was moved**. Returning them when a person moved a sticky themselves would make tiering impossible.
+- New boards are placed below existing content. At the viewport centre the rows would land on top of existing stickies and adopt them.
 
-- **行の順序はキャンバス上の並びを唯一の正とする。** 順序を別途保存しない。行を上下にドラッグすればそのまま並べ替えになる
-- 比べるのは**中心**。上端で比べると、行の高さぶん以上動かさないと入れ替わらない。中心なら「隣の行の中心を越えたら入れ替わる」になる
-- **行を動かしているあいだは並べ替えない。** 掴んでいる行の下で順番が入れ替わると手に負えなくなる。行が動いたときだけデバウンスを 420ms（付箋の 320ms より長い）に伸ばして、手を離してからまとめて並べ替える
-- 行はロックできない（`locked` は子にも効き、中の付箋が掴めなくなる）。つまりキャンバス上で行を掴めてしまうのは避けられないので、掴めることを前提に、掴んだ結果が破綻しないようにしてある
-- 詰め直しの位置はすべて盤面のセクションからの相対なので、**並べ替えても表そのものは動かない**し、ユーザーが表を掴んで動かした場所も保たれる
-- 行の中のアイテムを数えるときは、行・盤面・見出しを除く。行を別の行の上にドロップすると FigJam が行を行の子にすることがあり、そのまま数えると行そのものを付箋として左寄せに詰めはじめる
-- **行を別の行に重ねると、重ねた行が相手の行の中身を丸ごと飲み込む。** セクションは重なったノードを取り込むので、色セルも付箋も一緒に持っていかれる。対策は迷子を持ち主へ返すこと:
-  - 色セルは持ち主の行 ID を plugin data（`figjamTierLabel`）に持つ。持ち主でない行にいる色セルは返す（持ち主が消えていれば捨てる）。持ち主を見ないと、盗られた色セルをその行のものと見なし、盗られた側は色セルを作り直す ── 同じ名前の行が2つに見える
-  - 付箋は `figjamTierHome` の行へ返す。ただし**行が動かされた直後だけ**。人が付箋そのものを別の行へ動かしたときに返してしまうと、ティア分けができなくなる（そのときは行は動いていないので区別できる）
-- 行同士は隙間なく積む。各行の左端には、ティア名を表示する色付きのセル（`ShapeWithText`）を子として置く。ランキング対象ではないので plugin data（`figjamTierLabel`）で見分けて整列から除外し、`locked = true` でキャンバス上から掴めないようにしている
+### Order
 
-### 行の中の順位
+- **Row order and the order within a row are both read off the canvas.** Nothing is stored. Whatever was dragged into place is the truth, which is why reordering never needs to be reconciled with a saved list.
+- Rows are compared by vertical centre. Comparing top edges would require dragging a row further than its own height before anything changed.
+- Restacking is relative to the board section and never moves the board, so reordering leaves the table where it is — including where a user dragged it.
+- **Never order items by horizontal centre alone.** Once a row wraps, the leftmost item of the second line sits at the same x as the leftmost of the first, the lines interleave differently on every pass, and the row reflows forever.
+- **Lines are detected by top edge, not centre.** Items on a line share a top edge once arranged, whereas a tall sticky shifts the centre far enough to be read as its own line — the same endless reflow.
+- The default row is wide enough for exactly ten 240px stickies (2964px). Anything past that wraps and grows the row.
 
-- **行の中の順位も付箋の置かれた位置を唯一の正とする。** 整列は読み順（上の段が先、同じ段では左が先）に読んで左上から詰め直すだけなので、「ドラッグして落とした位置で順位が決まり、落とした先の付箋と場所が入れ替わる」が自然に出る
-- **読み順を中心 x だけで決めてはいけない。** 折り返すと2段目の左端と1段目の左端が同じ x になり、並べるたびに段が混ざって順序が変わる。順序が変われば位置が変わり、位置が変われば整列がまた走る ── 2段以上ある行が延々と並び直し続ける
-- **段の判定は上端で行う。** 整列後は同じ段の上端が揃う。中心で見ると、文字が多くて背の高い付箋が同じ段にいるだけで中心がずれ、別の段と判定されて上と同じ無限ループになる
-- 横幅に収まらない付箋は折り返し、行の高さを伸ばす
+### Auto-arrange
 
-### 自動整列
+- Changes are picked up on **both** `figma.currentPage.on('nodechange')` and `figma.on('documentchange')`. Betting on one channel means auto-arrange dies silently if that channel delivers nothing. Duplicate delivery is harmless: targets dedupe and the debounce coalesces. `documentAccess: "dynamic-page"` is deliberately not set, because it would make `documentchange` wait on `loadAllPagesAsync`.
+- Which channels subscribed is shown in the panel, so silence can be triaged without guessing.
+- **Only rows that changed are rearranged.** Rearranging untouched rows makes ranks look like they reshuffle themselves whenever a different row is touched.
+- Own writes are told apart from a person's edit by **comparing the parent, position and size the last arrange wrote** against the current values. Ignoring a window of time instead drops every sticky moved inside that window.
+- **The stamp includes the parent.** Rows are stacked at identical sizes, so position and size alone give (324,24)-in-A and (324,24)-in-S the same stamp, and a sticky dragged exactly one row straight up would pass as the plugin's own echo.
+- **Never test for a deleted node with `'removed' in node`.** `BaseNodeMixin` declares `readonly removed: boolean` too, so it is true for live nodes as well; every change is taken for a deletion and no arrange ever runs. Read the value. `'node' in change` is the same trap — switch on `change.type` instead.
+- A sticky drag is debounced by 320ms; a row drag waits 420ms, so a reorder cannot cut in while the row is still held.
+- `origin: 'REMOTE'` is ignored. Reacting to it would have every collaborator fighting over the same rows.
 
-- 変更は `figma.currentPage.on('nodechange')` と `figma.on('documentchange')` の**両方**で拾う。経路をひとつに賭けると、そちらが何も届けなかったときに自動整列が丸ごと死ぬ。二重に届いても、的は重複を除くしデバウンスでまとめられるので結果は変わらない
-- `documentchange` を使うため、manifest から `documentAccess: "dynamic-page"` を外している。dynamic-page だと `documentchange` は `loadAllPagesAsync` 待ちになる
-- どの経路で購読できたかはパネルの下に出す。自動整列が効かないときに、イベントが届いていないのか整列の側の問題なのかを切り分けられる
-- `documentchange` にはスタイルの変更も混ざってくる。そちらには `node` が無いので、`change.type` が `CREATE` / `DELETE` / `PROPERTY_CHANGE` のものだけを見る
-- **消えたノードの判定に `'removed' in node` を使ってはいけない。** `BaseNodeMixin` にも `readonly removed: boolean` があるので、生きているノードでも `true` になる。これをやると全部の変更が「消えたノード」扱いになり、整列の的が常に空で自動整列が一度も走らなくなる。見るのはプロパティの有無ではなく値（`node.removed`）。`node` の有無を `'node' in change` で見るのも同じ形の罠
-- ドラッグ中に割り込むと掴んでいる付箋が飛ぶので 320ms デバウンスする。`origin` が `REMOTE`（他の参加者の操作）には反応しない — 全員が同じ行を奪い合って動かし続けるため
-- **変更のあった行だけを並べ直す。** 全行を並べ直すと、ある行を触っただけで別の行の順位まで勝手に組み替わって見える
-- 付箋を行の外へ出したときのために、**どの行にいたかを付箋自身の plugin data に書く**（`figjamTierHome`）。出ていった先の情報だけでは元の行が分からない。メモリだけに持つと、プラグインを開き直した直後は「元の行」が分からず、一度整列を走らせるまで穴が詰まらない
-- まだ一度も整列していない付箋が親をまたいだときは元の行が分からないので、行き先の盤面をまとめて対象にする
-- 整列自身が起こす変更と人の操作は、**整列が最後に書いた親・位置・大きさと今の値を突き合わせて**見分ける。「整列の直後 N ミリ秒は無視する」という時間の窓にすると、その窓のあいだに動かした付箋が丸ごと取りこぼされる
-- **突き合わせる印には親を入れる。** 行はどれも同じ幅・同じ高さで縦に並んでいるので、位置と大きさだけだと「A の中の (324,24)」と「S の中の (324,24)」が同じ印になる。真上へ1行ぶんドラッグした付箋が自分の書き込みの反響と区別できなくなり、人が動かしたのに整列が走らない
+### Palette
 
-### 幅
+- **Canvas fills are document data, so colours cannot follow each viewer's editor theme.** Everyone sees the same board. Figma has the same constraint: its theme setting only picks the default background of *new* files (light `#F5F5F5`, dark `#1E1E1E`), leaving existing files alone.
+- So the palette is a per-board choice, seeded from `figma.currentPage.backgrounds`. That beats the editor theme: the main thread cannot read the theme at all (only the UI iframe can, via a `figma-dark` / `figma-light` class), and a hand-painted background is what is actually on screen. FigJam's light default measures `#E5E5E5`.
+- Lightness is judged by sRGB relative luminance. A plain average underrates green and reads a pure green background as dark.
+- The light face is brighter than the canvas (`#FFFFFF`) so the board reads as a card; matching the canvas would leave nothing but the row borders visible.
+- Tier colours are pastel and stay the same on either palette.
+- Boards created before palettes existed keep the dark default rather than being recoloured the moment the plugin opens.
+- Variable modes are no help: `setExplicitVariableModeForCollection` is explicit by name, a document-side choice, never resolved per viewer.
 
-- 既定幅は 240px の付箋がちょうど 10 枚入る 2964px（`色セル 300 + 余白 24*2 + 240*10 + 間隔 24*9`）
-- 各行に「前回書き込んだ幅」を plugin data で持たせ、実際の幅と食い違う行を探して「ユーザーが変えた行」を見つける。その幅が盤面の全行に伝播する
-- **縮めるときは、先に新しい幅で付箋を配置し直してからセクションを縮める。** 順序が逆だと、はみ出した付箋が行から抜け落ちる。行の高さ、盤面の大きさも同じ理由で、広げるのは配置の前、縮めるのは配置の後
+### Deleting
 
-### 削除
+- Removing a section takes its children with it, so a row's contents move out first — onto the page, below all page content. Left inside the board, or directly beneath it, a restacked row or the next board down would adopt them.
+- A board with no rows left goes away entirely, heading included.
 
-- セクションを消すと中の子ごと消えるため、行を削除するときは先に中身を逃がす
-- 逃がし先は**ページの全コンテンツの下**。盤面の中や真下に残すと、詰め直した行や下にある別の盤面がそれを踏んで自動的に子にしてしまう
-- 行が一枚も無くなった盤面は器ごと片付ける。見出しも一緒に消える
+### Known limits
 
-### 配色（ライト / ダーク）
+- Two people editing the same row at once can conflict.
+- The panel is visible only to whoever ran the plugin; the sections it creates are visible to everyone.
+- FigJam draws a section's name above it, so a tier letter shows both inside its coloured cell and above the row. There is no API to hide it.
 
-- **キャンバス上のノードの色は見る人ごとには変えられない。** 塗りはドキュメントのデータなので、ダークで見ている人とライトで見ている人に同じ色が見える。Figma 自身も同じ制約の中にいて、テーマ設定は「新規ファイルの既定の背景色」を決めるだけ（ライト `#F5F5F5` / ダーク `#1E1E1E`、既存ファイルの背景は変わらない）
-- なのでこれは**盤面ごとに1つ選ぶ設定**。全員に反映される
-- **初期値は `figma.currentPage.backgrounds` の明暗から決める。** エディタのテーマ設定ではない。テーマは main スレッドからは読めない（知れるのは UI の iframe だけで `figma-dark` / `figma-light` クラス）し、背景を手で変えている場合はそちらに合うほうが外さない。FigJam のライトの既定は実測 `#E5E5E5`
-- 明暗の判定は sRGB の相対輝度。単純な平均だと緑を過小・青を過大に評価して、真緑の背景をダークと誤判定する
-- **ライトの面はキャンバスより明るくする**（`#FFFFFF`）。キャンバスと同じ明るさにすると境界線しか見えず、カードに見えない
-- 色セル（ティアの色）はどちらの配色でも変えない。パステルなので両方で読める
-- 配色を持たない盤面（配色を入れる前に作られたもの）は既定のダークのまま。開いた途端に色が変わるのは避ける
-- 変数のモード（`setExplicitVariableModeForCollection`）は使えない。名前どおり「明示的に」ドキュメント側でモードを選ぶ仕組みで、見る人のテーマで解決されることはない
-
-### 名前
-
-- 盤面の名前は器（盤面のセクション）の plugin data に持たせ、キャンバスにも見出しのテキストノードとして出す。パネルの中だけに持っていても、一緒に見ている人には見えないため。行に持たせると、行を別の盤面へ移したときに名前まで付いていってしまう
-- 見出しは盤面のセクションの子。表ごと動かせば一緒に動く
-- 見出しは暗い面の上に乗るので、文字色を明るくする。既定の濃い文字色のままだと読めない
-
-### 既知の制約
-
-- 複数人が同時に同じ行を操作すると競合しうる
-- プラグインの UI と実行中であることは実行者本人にしか見えない（生成・変更されたセクションは全員に見える）
-- FigJam はセクション名を枠の上に小さく表示するので、ティア名が「色セルの中」と「枠の上」で二重に出る。API では消せない
-
-## 開発
+## Development
 
 ```sh
 npm install
-npm run build      # 本番ビルド（minify あり）
-npm run watch      # 変更を監視してビルド
-npm test           # ビルドしてテストを実行
-npm run test:watch # 監視しながらテスト
-npm run typecheck  # src + test の型検査
+npm run build      # production build (minified)
+npm run build:test # unminified, used by the tests
+npm run watch
+npm test           # build, then run every test
+npm run test:watch
+npm run typecheck  # src + test
 ```
 
-Figma デスクトップアプリで **Plugins → Development → Import plugin from manifest…** から、ビルドで生成される `manifest.json` を選ぶ。外部通信は行わない（`networkAccess.allowedDomains: ["none"]`）。
+Import `manifest.json` (generated by the build) through **Plugins → Development → Import plugin from manifest…** in the Figma desktop app. The plugin makes no network requests (`networkAccess.allowedDomains: ["none"]`).
 
-### 技術スタック
+### Stack
 
-[create-figma-plugin](https://yuanqing.github.io/create-figma-plugin/)（esbuild）でビルドする。素の `tsc` + `module: "none"` だと `import` が書けず、ドメインをモジュールに分けられない。
+Built with [create-figma-plugin](https://yuanqing.github.io/create-figma-plugin/) (esbuild). Plain `tsc` with `module: "none"` cannot use `import`, which rules out splitting the domain into modules.
 
-- **main**（`src/main.ts`）— Figma のノードを読み書きするアダプタ層。`export default` した関数が呼ばれる規約
-- **domain**（`src/domain/*`）— Figma に触らない純粋な部分。矩形の並びを受け取って置き場所を返す
-- **UI**（`src/ui.tsx`）— Preact ＋ `@create-figma-plugin/ui`。配色は Figma のテーマ変数（`--figma-color-*`）に乗る
-- **イベント**（`src/events.ts`）— main と UI のあいだのイベント名とペイロードを1箇所で宣言。`emit` / `on` に型が付く
+- **main** (`src/main.ts`) — the adapter that reads and writes Figma nodes. create-figma-plugin invokes its default export.
+- **domain** (`src/domain/*`) — no Figma imports. Rectangles in, rectangles out.
+- **UI** (`src/ui.tsx`) — Preact with `@create-figma-plugin/ui`; colours come from Figma's theme variables.
+- **events** (`src/events.ts`) — event names and payloads declared once, so `emit` / `on` are typed and a misspelling fails to compile.
 
-`manifest.json` はビルド生成物。設定は `package.json` の `figma-plugin` キー。
+`manifest.json` is generated; the configuration lives under the `figma-plugin` key of `package.json`.
 
-### テスト
+### Tests
 
-2層に分かれている。
+Two layers.
 
-**ドメインのテスト**（`test/domain/*`）はモックが要らない。矩形を渡して矩形が返るだけなので、23件が 7ms で終わる。整列が収束すること、段の判定が背の高さに影響されないことは、ここで直接固定してある。
+**Domain tests** (`test/domain/*`) need no mock. Rectangles in, rectangles out — 23 of them run in 7ms. Layout convergence and line detection are pinned here directly.
 
-**アダプタのテスト**（`test/*.test.ts`）は `test/harness.ts` で Figma Plugin API を最小限モックし、ビルド済みの `build/main.js` を `vm` で読み込んで UI からのイベントで駆動する。セクションが重なったノードを自動的に子にする挙動（入れ子も含む）も近似してあるので、付箋の所属判定・行削除時の退避・表ごとの移動を Figma なしで確かめられる。
+**Adapter tests** (`test/*.test.ts`) use `test/harness.ts`, a minimal mock of the Plugin API, and load the built `build/main.js` in a `vm`, driving it with UI events. Section adoption is approximated, nesting included, so membership, rescue-on-delete and moving the whole table can all be checked without Figma.
 
-**モックは実物の形に合わせること。** ノードは消えていなくても `removed`（`false`）を持つ、付箋も plugin data を持つ ── といった細部がずれていると、そこに依存したバグをテストが素通りさせる。実際にこの2つで素通りした。`harness.ts` の `ModeledSceneProps` に挙げたプロパティは実物の型と突き合わせてあるので、モックから落とすとコンパイルで落ちる。
+**Keep the mock shaped like the real API.** A node carries `removed` (`false`) while alive; a sticky carries plugin data. Both of those details were wrong in the mock, and both let a real bug pass every test. `ModeledSceneProps` in the harness is checked against the real types, so dropping a modelled property now fails to compile.
 
-## 構成
+## Layout
 
 ```
-package.json          figma-plugin キーに manifest の設定
-src/main.ts           Figma のノードを読み書きするアダプタ層
-src/domain/layout.ts  読み順と折り返し（純粋）
-src/domain/order.ts   行の並び順・幅の決定・行の名前（純粋）
-src/domain/queue.ts   次の整列で何を待って並べ直すか（純粋）
-src/domain/color.ts   色（純粋）
-src/domain/theme.ts   盤面の配色と、背景の明暗からの判定（純粋）
-src/events.ts         main ↔ UI のイベント宣言
-src/ui.tsx            パネル UI（Preact）
-src/ui.css            Tier 表に固有の見た目
-test/harness.ts       Figma Plugin API のモック
-test/domain/*.test.ts ドメインのテスト（モックなし）
-test/*.test.ts        アダプタのテスト（ハーネス経由）
+package.json           manifest configuration under the figma-plugin key
+src/main.ts            the Figma adapter
+src/domain/layout.ts   reading order and wrapping
+src/domain/order.ts    row order, board width, row names
+src/domain/queue.ts    what the next arrange should touch, and when
+src/domain/color.ts    tier colours
+src/domain/theme.ts    board palettes and the choice from the canvas background
+src/events.ts          main <-> UI event declarations
+src/ui.tsx             the panel
+src/ui.css             what is specific to the tier board
+test/harness.ts        the Plugin API mock
+test/domain/*.test.ts  domain tests, no mock
+test/*.test.ts         adapter tests, through the harness
 ```

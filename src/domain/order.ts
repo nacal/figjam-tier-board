@@ -1,5 +1,3 @@
-// 行の並び順。Figma のノードには触らない。
-
 export interface Sized {
   y: number;
   height: number;
@@ -9,13 +7,12 @@ export interface Identified {
   id: string;
 }
 
-// 行の順番はキャンバス上の並びを正とする。中心で比べる ── 上端で比べると、
-// 行の高さぶん以上動かさないと入れ替わらない。
+// Rows are ordered by vertical centre. Comparing top edges would require
+// dragging a row further than its own height before it changed places.
 export function byVerticalCenter<T extends Sized>(rows: T[]): T[] {
   return rows.slice().sort((a, b) => a.y + a.height / 2 - (b.y + b.height / 2));
 }
 
-// 上から隙間なく積んだときの y。
 export function stackPositions(heights: number[], gap: number, offsetY: number): number[] {
   const positions: number[] = [];
   let cursor = offsetY;
@@ -26,7 +23,6 @@ export function stackPositions(heights: number[], gap: number, offsetY: number):
   return positions;
 }
 
-// ひとつ上／下と入れ替える。端なら何もしない。
 export function swapNeighbour<T>(items: T[], index: number, direction: 'up' | 'down'): T[] {
   const target = direction === 'up' ? index - 1 : index + 1;
   if (index < 0 || index >= items.length || target < 0 || target >= items.length) {
@@ -39,8 +35,8 @@ export function swapNeighbour<T>(items: T[], index: number, direction: 'up' | 'd
   return next;
 }
 
-// 渡された ID の順に並べ、残りは現在の順序のまま後ろへ回す。パネルが把握して
-// いない行が盤面にあってもいいようにするため。
+// Items not named in `ids` keep their relative order at the end, so a row the
+// panel does not know about still survives a reorder.
 export function applyOrder<T extends Identified>(items: T[], ids: string[]): T[] {
   const ordered: T[] = [];
   for (const id of ids) {
@@ -57,8 +53,8 @@ export function applyOrder<T extends Identified>(items: T[], ids: string[]): T[]
   return ordered;
 }
 
-// 盤面の幅。ユーザーがどれか1行の幅を変えたら、それを全行に広げる。
-// 「変えた行」は、前回書き込んでおいた幅と実際の幅が食い違う行として見つける。
+// The row the user resized is the one whose actual width no longer matches the
+// width last written to it; that width becomes the width of the whole board.
 export function resolveBoardWidth(
   rows: Array<{ width: number; stored: number | null }>,
   fallback: number,
@@ -80,7 +76,6 @@ export function resolveBoardWidth(
   return widest;
 }
 
-// 追加する行の名前。S から順に、使われていない文字を採る。
 export function nextRowName(used: string[], fallbackIndex: number): string {
   const alphabet = 'SABCDEFGHIJKLMNOPQRTUVWXYZ';
   for (const letter of alphabet) {

@@ -1,13 +1,13 @@
-// 次の整列で何をどれだけ待って並べ直すか。module 変数に散らすとステートマシンが
-// 見えなくなるので、ひとつのオブジェクトに閉じる。Figma のノードには触らない。
-
 export interface ArrangeRequest {
-  /** 並べ直す行。null なら全部 */
+  /** Rows to rearrange, or null for every row. */
   targets: string[] | null;
-  /** 行そのものが動かされたか（迷子の付箋を元の行へ返すかの判断に使う） */
+  /** Whether a row itself was moved, which decides if stray stickies go home. */
   rowDragged: boolean;
 }
 
+// Holds what the next arrange should touch and how long to wait for it. Kept in
+// one object because spread across module variables the state machine is
+// invisible and untestable.
 export class ArrangeQueue {
   private rowIds: string[] = [];
   private all = false;
@@ -32,8 +32,8 @@ export class ArrangeQueue {
     this.rowDragged = true;
   }
 
-  // 待ち時間はいちばん長いものに合わせる。行が動いているあいだに付箋の変更が
-  // 混ざっても、行の並べ替えが割り込まないようにする。
+  // Takes the longest requested delay, so a sticky change arriving mid row-drag
+  // cannot make the reorder cut in early.
   requestDelay(delay: number): void {
     this.delay = Math.max(this.delay, delay);
   }

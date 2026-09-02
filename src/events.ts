@@ -1,6 +1,5 @@
 import { EventHandler } from '@create-figma-plugin/utilities';
 
-// パネルに映す状態。main が組んで UI へ渡す唯一の型。
 export interface RowView {
   id: string;
   name: string;
@@ -24,7 +23,7 @@ export interface ColorPreset {
 export type BoardTheme = 'light' | 'dark';
 
 export interface PanelState {
-  /** 選択中の盤面の配色 */
+  /** Palette of the board the panel is acting on. */
   boardTheme: BoardTheme;
   boards: BoardView[];
   activeBoardId: string | null;
@@ -34,7 +33,7 @@ export interface PanelState {
   subscriptions: string[];
 }
 
-// UI → main
+// UI -> main
 export interface RequestStateHandler extends EventHandler {
   name: 'REQUEST_STATE';
   handler: () => void;
@@ -89,7 +88,7 @@ export interface SetBoardThemeHandler extends EventHandler {
   handler: (boardId: string, theme: BoardTheme) => void;
 }
 
-// main → UI
+// main -> UI
 export interface StateHandler extends EventHandler {
   name: 'STATE';
   handler: (state: PanelState) => void;

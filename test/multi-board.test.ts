@@ -16,7 +16,7 @@ async function twoBoards(h: Harness) {
   return { ids, rowsOf, containerOf };
 }
 
-test('盤面はいくつでも作れて、２つ目は１つ目の下に置かれる', async () => {
+test('any number of boards can be created, the second below the first', async () => {
   const h = createHarness();
   const { ids, rowsOf, containerOf } = await twoBoards(h);
 
@@ -27,9 +27,9 @@ test('盤面はいくつでも作れて、２つ目は１つ目の下に置か�
 
   const top = containerOf(ids[0])!;
   const bottom = containerOf(ids[1])!;
-  assert.ok(h.absolute(bottom).y >= h.absolute(top).y + top.height, '２つ目は１つ目より下');
+  assert.ok(h.absolute(bottom).y >= h.absolute(top).y + top.height, 'the second sits below the first');
 
-  // それぞれの中では隙間なく積まれている
+  // Each board stacks flush internally.
   for (const rows of [first, second]) {
     for (let i = 1; i < rows.length; i++) {
       assert.equal(rows[i].y, rows[i - 1].y + rows[i - 1].height);
@@ -37,7 +37,7 @@ test('盤面はいくつでも作れて、２つ目は１つ目の下に置か�
   }
 });
 
-test('整列しても盤面どうしは合体しない', async () => {
+test('arranging does not merge boards', async () => {
   const h = createHarness();
   const { ids, rowsOf, containerOf } = await twoBoards(h);
   const gap = () =>
@@ -47,12 +47,12 @@ test('整列しても盤面どうしは合体しない', async () => {
 
   await h.send('ARRANGE_NOW');
 
-  assert.equal(gap(), gapBefore, '盤面の間の余白は詰められない');
+  assert.equal(gap(), gapBefore, 'the gap between boards is not closed');
   assert.equal(rowsOf(ids[0]).length, 5);
   assert.equal(rowsOf(ids[1]).length, 5);
 });
 
-test('幅の変更は同じ盤面のなかだけに広がる', async () => {
+test('a width change spreads within its own board only', async () => {
   const h = createHarness();
   const { ids, rowsOf } = await twoBoards(h);
 
@@ -63,14 +63,14 @@ test('幅の変更は同じ盤面のなかだけに広がる', async () => {
   await h.send('ARRANGE_NOW');
 
   for (const row of rowsOf(ids[0])) {
-    assert.equal(row.width, widened, '同じ盤面は広がる');
+    assert.equal(row.width, widened, 'the same board widens');
   }
   for (const row of rowsOf(ids[1])) {
-    assert.equal(row.width, DEFAULT_WIDTH, 'もう一方は元のまま');
+    assert.equal(row.width, DEFAULT_WIDTH, 'the other is untouched');
   }
 });
 
-test('並べ替えは盤面をまたがない', async () => {
+test('reordering never crosses boards', async () => {
   const h = createHarness();
   const { ids, rowsOf } = await twoBoards(h);
   const otherBefore = rowsOf(ids[1]).map((r) => ({ name: r.name, y: r.y }));
@@ -79,28 +79,28 @@ test('並べ替えは盤面をまたがない', async () => {
   await h.send('REORDER_ROWS', [target[4].id, target[0].id, target[1].id, target[2].id, target[3].id]);
 
   assert.deepEqual(rowsOf(ids[0]).map((r) => r.name), ['D', 'S', 'A', 'B', 'C']);
-  assert.deepEqual(rowsOf(ids[1]).map((r) => ({ name: r.name, y: r.y })), otherBefore, 'もう一方は動かない');
-  assert.deepEqual(rowsOf(ids[0]).map((r) => r.y), [0, 300, 600, 900, 1200], '枠はそのまま');
+  assert.deepEqual(rowsOf(ids[1]).map((r) => ({ name: r.name, y: r.y })), otherBefore, 'the other does not move');
+  assert.deepEqual(rowsOf(ids[0]).map((r) => r.y), [0, 300, 600, 900, 1200], 'the slots are unchanged');
 });
 
-test('キャンバスで選ぶと、パネルの操作対象がその盤面に移る', async () => {
+test('selecting on the canvas switches the panel to that board', async () => {
   const h = createHarness();
   const { ids, rowsOf } = await twoBoards(h);
 
-  // ２つ目を作った直後はそちらが対象
+  // The board just created is the active one.
   assert.equal(h.state().activeBoardId, ids[1]);
 
-  // １つ目の行の中の付箋を選ぶ
+  // Select a sticky inside the first board.
   const row = rowsOf(ids[0])[0];
-  const sticky = h.dropIn(row, 'マイクラ', CONTENT_X, 30);
+  const sticky = h.dropIn(row, 'Minecraft', CONTENT_X, 30);
   h.select(sticky);
 
   const message = h.state();
-  assert.equal(message.activeBoardId, ids[0], '選んだ付箋のいる盤面に移る');
+  assert.equal(message.activeBoardId, ids[0], 'switches to the board holding the selected sticky');
   assert.deepEqual(message.rows.map((r) => r.id), Array.from(rowsOf(ids[0]), (r) => r.id));
 });
 
-test('行の追加は選択中の盤面に入る', async () => {
+test('a new row goes into the active board', async () => {
   const h = createHarness();
   const { ids, rowsOf } = await twoBoards(h);
 
@@ -110,10 +110,10 @@ test('行の追加は選択中の盤面に入る', async () => {
   assert.equal(rowsOf(ids[0]).length, 6);
   assert.equal(rowsOf(ids[1]).length, 5);
   const added = rowsOf(ids[0])[5];
-  assert.equal(added.y, rowsOf(ids[0])[4].y + rowsOf(ids[0])[4].height, '末尾に隙間なく付く');
+  assert.equal(added.y, rowsOf(ids[0])[4].y + rowsOf(ids[0])[4].height, 'appended flush at the end');
 });
 
-test('片方の盤面の行を消してももう一方は動かない', async () => {
+test('deleting a row on one board leaves the other still', async () => {
   const h = createHarness();
   const { ids, rowsOf } = await twoBoards(h);
   const otherBefore = rowsOf(ids[1]).map((r) => ({ name: r.name, y: r.y }));
@@ -124,7 +124,7 @@ test('片方の盤面の行を消してももう一方は動かない', async ()
   assert.deepEqual(rowsOf(ids[1]).map((r) => ({ name: r.name, y: r.y })), otherBefore);
 });
 
-test('盤面をひとつ消しきってももう一方は残る', async () => {
+test('wiping out one board leaves the other', async () => {
   const h = createHarness();
   const { ids, rowsOf, containerOf } = await twoBoards(h);
 
@@ -132,18 +132,18 @@ test('盤面をひとつ消しきってももう一方は残る', async () => {
     await h.send('DELETE_ROW', row.id);
   }
 
-  assert.equal(containerOf(ids[0]), undefined, '空になった盤面は器ごと消える');
+  assert.equal(containerOf(ids[0]), undefined, 'an emptied board disappears with its container');
   assert.equal(rowsOf(ids[1]).length, 5);
   assert.equal(h.state().boards.length, 1);
-  assert.equal(h.state().activeBoardId, ids[1], '残った盤面が対象になる');
+  assert.equal(h.state().activeBoardId, ids[1], 'the surviving board becomes active');
 });
 
-test('行を消したときの逃がし先が、下にある別の盤面に刺さらない', async () => {
+test('the rescue target of a deleted row does not land in the board below', async () => {
   const h = createHarness();
   const { ids, rowsOf, containerOf } = await twoBoards(h);
 
   const row = rowsOf(ids[0])[1];
-  h.dropIn(row, 'マイクラ', CONTENT_X, 30);
+  h.dropIn(row, 'Minecraft', CONTENT_X, 30);
   await h.send('ARRANGE_NOW');
   const sticky = h.items(row)[0];
   const lower = containerOf(ids[1])!;
@@ -152,6 +152,6 @@ test('行を消したときの逃がし先が、下にある別の盤面に刺�
   await h.send('DELETE_ROW', row.id);
 
   assert.equal(sticky.removed, false);
-  assert.equal(sticky.parent!.type, 'PAGE', '下の盤面に取り込まれていない');
-  assert.ok(h.absolute(sticky).y >= lowerBottom, '２つ目の盤面より下にいる');
+  assert.equal(sticky.parent!.type, 'PAGE', 'not adopted by the board below');
+  assert.ok(h.absolute(sticky).y >= lowerBottom, 'sits below the second board');
 });

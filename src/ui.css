@@ -1,4 +1,4 @@
-/* Tier 表に固有の見た目だけ。汎用の部品は @create-figma-plugin/ui に任せる。 */
+/* Only what is specific to the tier board; generic controls come from @create-figma-plugin/ui. */
 
 .rows {
   list-style: none;

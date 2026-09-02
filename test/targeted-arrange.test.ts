@@ -4,36 +4,36 @@ import { createHarness, type FakeNode, type Harness } from './harness';
 
 const CONTENT_X = 300 + 24;
 
-// 行のなかに、左詰めになっていない位置で付箋を置く
+// Places stickies inside a row at positions that are not packed left.
 function scatter(h: Harness, row: FakeNode, names: string[], offsets: number[]): FakeNode[] {
   return names.map((name, i) => h.dropIn(row, name, CONTENT_X + offsets[i], 30));
 }
 
-test('ある行を触っても、別の行の中身は並び直さない', async () => {
+test('touching one row leaves the contents of other rows alone', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
 
   const rows = h.rows();
 
-  // A 行には、詰まっていない位置のまま付箋を置いておく
-  const untouched = scatter(h, rows[1], ['あ', 'い'], [600, 1200]);
+  // Leave row A's stickies unpacked.
+  const untouched = scatter(h, rows[1], ['a', 'i'], [600, 1200]);
   const before = untouched.map((n) => ({ id: n.id, x: n.x, y: n.y }));
 
-  // S 行に付箋を落として動かす
+  // Drop a sticky into row S and move it.
   const moved = scatter(h, rows[0], ['S1'], [900])[0];
   h.change(moved);
   await h.flush();
 
-  assert.equal(moved.x, CONTENT_X, '触った行は左詰めになる');
+  assert.equal(moved.x, CONTENT_X, 'the touched row packs left');
   assert.deepEqual(
     untouched.map((n) => ({ id: n.id, x: n.x, y: n.y })),
     before,
-    '触っていない行の中身は1ミリも動かない',
+    'the contents of an untouched row do not move at all',
   );
 });
 
-test('別の盤面の中身も並び直さない', async () => {
+test('the contents of another board are not rearranged either', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.send('CREATE_BOARD');
@@ -56,7 +56,7 @@ test('別の盤面の中身も並び直さない', async () => {
   assert.deepEqual(untouched.map((n) => ({ x: n.x, y: n.y })), before);
 });
 
-test('付箋を行の外へ出すと、元の行だけが詰め直される', async () => {
+test('moving a sticky out of a row repacks only that row', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
@@ -67,7 +67,7 @@ test('付箋を行の外へ出すと、元の行だけが詰め直される', as
   await h.flush();
   assert.deepEqual(h.items(rows[0]).map((n) => n.x).sort((a, b) => a - b), [324, 588, 852]);
 
-  // 真ん中を行の外（キャンバスの下）へ放り出す
+  // Throw the middle one out of the row, below the canvas content.
   const dragged = items[1];
   const container = h.containers()[0];
   h.page.appendChild(dragged);
@@ -81,6 +81,6 @@ test('付箋を行の外へ出すと、元の行だけが詰め直される', as
   assert.deepEqual(
     h.items(rows[0]).map((n) => n.x).sort((a, b) => a - b),
     [324, 588],
-    '抜けた穴は詰まる',
+    'the gap closes',
   );
 });

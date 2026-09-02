@@ -4,32 +4,32 @@ import { createHarness } from './harness';
 
 const CONTENT_X = 300 + 24;
 
-test('プラグインを開いて2つ目の盤面を足し、そこへ付箋を落とすと左に詰まる', async () => {
+test('a sticky dropped onto a second board added after opening the plugin packs left', async () => {
   const h = createHarness();
-  // 1つ目はすでにある状態から始める（前のセッションで作られた盤面）
+  // Start with one board already there, as if from an earlier session.
   await h.send('CREATE_BOARD');
   await h.flush();
   h.restart();
   await h.send('REQUEST_STATE');
 
-  // 2つ目を追加
+  // Add a second one.
   await h.send('CREATE_BOARD');
   await h.flush();
   const containers = h.containers();
   assert.equal(containers.length, 2);
 
   const row = h.rowsOf(containers[1])[0];
-  const sticky = h.dropIn(row, 'マイクラ', CONTENT_X + 900, 60);
-  assert.equal(sticky.parent!.id, row.id, '行の子になっている');
+  const sticky = h.dropIn(row, 'Minecraft', CONTENT_X + 900, 60);
+  assert.equal(sticky.parent!.id, row.id, 'is a child of the row');
 
   h.change(sticky);
   await h.flush();
 
-  assert.equal(sticky.x, CONTENT_X, '左に詰まる');
+  assert.equal(sticky.x, CONTENT_X, 'packs left');
   assert.equal(sticky.y, 24);
 });
 
-test('2つ目の盤面をキャンバス外から落とした付箋でも左に詰まる', async () => {
+test('a sticky dropped onto the second board from elsewhere packs left', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.send('CREATE_BOARD');
@@ -37,8 +37,8 @@ test('2つ目の盤面をキャンバス外から落とした付箋でも左に�
   const containers = h.containers();
   const row = h.rowsOf(containers[1])[2];
 
-  // ページ上の遠くにある付箋を掴んで、2つ目の盤面の行へ落とす
-  const sticky = h.createSticky('パルワールド', 0, 0);
+  // Grab a distant sticky and drop it into a row of the second board.
+  const sticky = h.createSticky('Palworld', 0, 0);
   h.settle();
   h.change(sticky);
 
@@ -51,10 +51,10 @@ test('2つ目の盤面をキャンバス外から落とした付箋でも左に�
   await h.flush();
 
   assert.equal(sticky.parent!.id, row.id);
-  assert.equal(sticky.x, CONTENT_X, '左に詰まる');
+  assert.equal(sticky.x, CONTENT_X, 'packs left');
 });
 
-test('FigJam が外側の盤面に付けた付箋も、重なっている行に引き取られて左に詰まる', async () => {
+test('a sticky FigJam attached to the outer board is adopted by the row it overlaps and packs left', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.send('CREATE_BOARD');
@@ -62,42 +62,42 @@ test('FigJam が外側の盤面に付けた付箋も、重なっている行に�
   const containers = h.containers();
   const rows = h.rowsOf(containers[1]);
 
-  // 3行目（C）の帯に重なる高さで、盤面に直接ぶら下がった付箋
-  const sticky = h.dropOnBoard(containers[1], 'マイクラ', CONTENT_X + 900, rows[2].y + 40);
-  assert.equal(sticky.parent!.id, containers[1].id, '盤面の子で、行の子ではない');
+  // A sticky attached to the board at the height of the third row (C).
+  const sticky = h.dropOnBoard(containers[1], 'Minecraft', CONTENT_X + 900, rows[2].y + 40);
+  assert.equal(sticky.parent!.id, containers[1].id, 'a child of the board, not of a row');
 
   h.change(sticky);
   await h.flush();
 
-  assert.equal(sticky.parent!.id, rows[2].id, '重なっている行が引き取る');
-  assert.equal(sticky.x, CONTENT_X, '左に詰まる');
+  assert.equal(sticky.parent!.id, rows[2].id, 'the overlapping row adopts it');
+  assert.equal(sticky.x, CONTENT_X, 'packs left');
   assert.equal(sticky.y, 24);
 });
 
-test('見出しは引き取られない', async () => {
+test('the heading is not adopted', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
   const id = h.state().boards[0].id;
-  await h.send('SET_BOARD_NAME', id, '名前');
+  await h.send('SET_BOARD_NAME', id, 'Name');
 
   await h.send('ARRANGE_NOW');
 
   const container = h.containers()[0];
   const heading = h.titleOf(container);
-  assert.ok(heading, '見出しは盤面の子のまま');
+  assert.ok(heading, 'the heading stays a child of the board');
   assert.equal(heading.parent!.id, container.id);
 });
 
-test('引き取り先は落とした高さで決まる', async () => {
+test('the adopting row is decided by the drop height', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
   const container = h.containers()[0];
   const rows = h.rowsOf(container);
 
-  const top = h.dropOnBoard(container, 'S行へ', CONTENT_X, rows[0].y + 10);
-  const bottom = h.dropOnBoard(container, 'D行へ', CONTENT_X, rows[4].y + 250);
+  const top = h.dropOnBoard(container, 'to row S', CONTENT_X, rows[0].y + 10);
+  const bottom = h.dropOnBoard(container, 'to row D', CONTENT_X, rows[4].y + 250);
   h.change([top, bottom]);
   await h.flush();
 

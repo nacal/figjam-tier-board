@@ -18,51 +18,51 @@ async function board(h: Harness): Promise<string> {
   return h.state().boards[0].id;
 }
 
-test('名前を付けると盤面の中に見出しが出る', async () => {
+test('naming a board puts a heading inside it', async () => {
   const h = createHarness();
   const id = await board(h);
 
-  await h.send('SET_BOARD_NAME', id, '2026年ベストゲーム');
+  await h.send('SET_BOARD_NAME', id, 'Best games of 2026');
 
   const heading = title(h, id);
-  assert.ok(heading, '見出しができる');
-  assert.equal(heading.characters, '2026年ベストゲーム');
-  assert.equal(heading.parent!.id, containerOf(h, id)!.id, '盤面の子なので表ごと動く');
+  assert.ok(heading, 'a heading is created');
+  assert.equal(heading.characters, 'Best games of 2026');
+  assert.equal(heading.parent!.id, containerOf(h, id)!.id, 'a child of the board, so it travels with the table');
 
   const top = h.rows()[0];
-  assert.equal(heading.x, 0, '盤面の左端に揃う');
-  assert.ok(heading.y + heading.height <= top.y, 'いちばん上の行より上にいる');
+  assert.equal(heading.x, 0, 'aligns to the board left edge');
+  assert.ok(heading.y + heading.height <= top.y, 'sits above the topmost row');
 });
 
-test('名前は盤面のセクション名にもなる', async () => {
+test('the name becomes the board section name too', async () => {
   const h = createHarness();
   const id = await board(h);
 
-  await h.send('SET_BOARD_NAME', id, 'サバイバル');
+  await h.send('SET_BOARD_NAME', id, 'Survival');
 
-  assert.equal(containerOf(h, id)!.name, 'サバイバル');
+  assert.equal(containerOf(h, id)!.name, 'Survival');
   const listed = h.state().boards[0];
-  assert.equal(listed.name, 'サバイバル');
-  assert.equal(listed.label, 'サバイバル', '無名のときの「盤面 N」を置き換える');
+  assert.equal(listed.name, 'Survival');
+  assert.equal(listed.label, 'Survival', 'replaces the unnamed Board N label');
 });
 
-test('名前を消すと見出しも消える', async () => {
+test('clearing the name removes the heading', async () => {
   const h = createHarness();
   const id = await board(h);
-  await h.send('SET_BOARD_NAME', id, 'いったん命名');
+  await h.send('SET_BOARD_NAME', id, 'named for now');
   assert.ok(title(h, id));
 
   await h.send('SET_BOARD_NAME', id, '   ');
 
   assert.equal(title(h, id), null);
-  assert.equal(h.state().boards[0].label, '盤面 1');
-  assert.equal(h.rows()[0].y, 0, '見出しのぶんの余白も戻る');
+  assert.equal(h.state().boards[0].label, 'Board 1');
+  assert.equal(h.rows()[0].y, 0, 'the space the heading took is reclaimed');
 });
 
-test('表ごと動かしても見出しは付いてくる', async () => {
+test('the heading follows when the whole table moves', async () => {
   const h = createHarness();
   const id = await board(h);
-  await h.send('SET_BOARD_NAME', id, '追従テスト');
+  await h.send('SET_BOARD_NAME', id, 'Follow test');
 
   const container = containerOf(h, id)!;
   const heading = title(h, id)!;
@@ -76,10 +76,10 @@ test('表ごと動かしても見出しは付いてくる', async () => {
   assert.equal(heading.parent!.id, container.id);
 });
 
-test('行が伸びても見出しは行に飲まれない', async () => {
+test('the heading is not swallowed when a row grows', async () => {
   const h = createHarness();
   const id = await board(h);
-  await h.send('SET_BOARD_NAME', id, '追従テスト');
+  await h.send('SET_BOARD_NAME', id, 'Follow test');
 
   const rows = h.rows();
   for (let i = 0; i < 13; i++) {
@@ -88,48 +88,48 @@ test('行が伸びても見出しは行に飲まれない', async () => {
   await h.send('ARRANGE_NOW');
 
   const heading = title(h, id);
-  assert.ok(heading, '見出しが残っている');
+  assert.ok(heading, 'the heading survives');
   assert.equal(heading.parent!.id, containerOf(h, id)!.id);
   assert.ok(heading.y + heading.height <= h.rows()[0].y);
 });
 
-test('盤面ごとに別の名前を持てる', async () => {
+test('each board can have its own name', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.send('CREATE_BOARD');
   await h.flush();
   const ids = h.state().boards.map((b) => b.id);
 
-  await h.send('SET_BOARD_NAME', ids[0], '面白さ');
-  await h.send('SET_BOARD_NAME', ids[1], '難易度');
+  await h.send('SET_BOARD_NAME', ids[0], 'Fun');
+  await h.send('SET_BOARD_NAME', ids[1], 'Difficulty');
 
-  assert.deepEqual(h.state().boards.map((b) => b.name), ['面白さ', '難易度']);
-  assert.equal(title(h, ids[0])!.characters, '面白さ');
-  assert.equal(title(h, ids[1])!.characters, '難易度');
+  assert.deepEqual(h.state().boards.map((b) => b.name), ['Fun', 'Difficulty']);
+  assert.equal(title(h, ids[0])!.characters, 'Fun');
+  assert.equal(title(h, ids[1])!.characters, 'Difficulty');
 });
 
-test('盤面の行を全部消すと器ごと片付く', async () => {
+test('deleting every row takes the container with it', async () => {
   const h = createHarness();
   const id = await board(h);
-  await h.send('SET_BOARD_NAME', id, '消える盤面');
+  await h.send('SET_BOARD_NAME', id, 'Board to delete');
 
   for (const row of h.rows()) {
     await h.send('DELETE_ROW', row.id);
   }
 
   assert.equal(h.rows().length, 0);
-  assert.equal(containerOf(h, id), null, '見出しごと消える');
+  assert.equal(containerOf(h, id), null, 'the heading goes with it');
 });
 
-test('見出しの文字は行の面と十分な明暗差がある', async () => {
+test('the heading contrasts enough with the row face', async () => {
   const h = createHarness();
   const id = await board(h);
 
-  await h.send('SET_BOARD_NAME', id, '読めるか');
+  await h.send('SET_BOARD_NAME', id, 'Readable?');
 
   const container = containerOf(h, id)!;
   const titleFill = JSON.parse(JSON.stringify(title(h, id)!.fills))[0].color;
   const rowFill = JSON.parse(JSON.stringify(h.rowsOf(container)[0].fills))[0].color;
   const diff = Math.abs(relativeLuminance(titleFill) - relativeLuminance(rowFill));
-  assert.ok(diff > 0.5, `面と見出しの差が ${diff.toFixed(2)} しかない`);
+  assert.ok(diff > 0.5, `face vs heading differs by only ${diff.toFixed(2)}`);
 });

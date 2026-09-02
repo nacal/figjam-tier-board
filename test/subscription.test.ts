@@ -4,7 +4,7 @@ import { createHarness } from './harness';
 
 const CONTENT_X = 300 + 24;
 
-test('キャンバスの変更を両方の経路で購読し、パネルに出す', async () => {
+test('subscribes to canvas changes on both channels and reports them', async () => {
   const h = createHarness();
   await h.send('REQUEST_STATE');
 
@@ -13,33 +13,33 @@ test('キャンバスの変更を両方の経路で購読し、パネルに出�
 });
 
 for (const channel of ['nodechange', 'documentchange'] as const) {
-  test(`${channel} だけが届いても整列する`, async () => {
+  test(`arranges when only ${channel} is delivered`, async () => {
     const h = createHarness();
     await h.send('CREATE_BOARD');
     await h.flush();
     const row = h.rows()[0];
 
-    h.dropIn(row, 'あ', CONTENT_X + 600, 40);
-    h.dropIn(row, 'い', CONTENT_X + 1200, 40);
+    h.dropIn(row, 'a', CONTENT_X + 600, 40);
+    h.dropIn(row, 'i', CONTENT_X + 1200, 40);
     h.changeVia(channel, h.items(row));
     await h.flush();
 
     assert.deepEqual(
       h.items(row).map((n) => n.x).sort((a, b) => a - b),
       [324, 588],
-      '左に詰まる',
+      'packs left',
     );
   });
 }
 
-test('両方から二重に届いても結果は同じ', async () => {
+test('duplicate delivery on both channels changes nothing', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
   const row = h.rows()[0];
 
-  h.dropIn(row, 'あ', CONTENT_X + 600, 40);
-  h.dropIn(row, 'い', CONTENT_X + 1200, 40);
+  h.dropIn(row, 'a', CONTENT_X + 600, 40);
+  h.dropIn(row, 'i', CONTENT_X + 1200, 40);
   h.change(h.items(row));
   await h.flush();
 
@@ -47,40 +47,40 @@ test('両方から二重に届いても結果は同じ', async () => {
   assert.equal(row.height, 300);
 });
 
-test('スタイルの変更（node を持たない）が混ざっても落ちない', async () => {
+test('survives style changes, which carry no node', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
   const row = h.rows()[0];
-  h.dropIn(row, 'あ', CONTENT_X + 600, 40);
+  h.dropIn(row, 'a', CONTENT_X + 600, 40);
 
-  // node を持たない変更だけが届く（整列は走らない）
+  // Only a change with no node arrives, so nothing is arranged.
   for (const listener of h.figma.documentListeners()) {
     listener({ documentChanges: [{ type: 'STYLE_PROPERTY_CHANGE', id: 'S:1', origin: 'LOCAL', style: {} }] });
   }
   await h.flush();
-  assert.deepEqual(h.items(row).map((n) => n.x), [924], 'スタイルの変更では整列しない');
+  assert.deepEqual(h.items(row).map((n) => n.x), [924], 'a style change does not trigger an arrange');
 
-  // そのあとの本物の変更はちゃんと拾える
+  // A real change afterwards is still picked up.
   h.change(h.items(row));
   await h.flush();
-  assert.deepEqual(h.items(row).map((n) => n.x), [324], 'あとの整列も生きている');
+  assert.deepEqual(h.items(row).map((n) => n.x), [324], 'later arranges still run');
 });
 
-test('生きているノードを「消えたノード」と誤判定しない', async () => {
+test('a live node is not mistaken for a deleted one', async () => {
   const h = createHarness();
   await h.send('CREATE_BOARD');
   await h.flush();
   const row = h.rows()[0];
-  const sticky = h.dropIn(row, 'あ', CONTENT_X + 900, 40);
+  const sticky = h.dropIn(row, 'a', CONTENT_X + 900, 40);
 
-  // 実物の BaseNodeMixin は removed を必ず持つ（生きていれば false）。
-  // プロパティの有無で判定すると、この付箋が消えた扱いになって的から外れる。
-  assert.equal('removed' in sticky, true, '生きていても removed プロパティはある');
+  // Real nodes always carry removed, false while alive. Testing for the property
+  // instead of the value would take this sticky for deleted and skip it.
+  assert.equal('removed' in sticky, true, 'a live node still has a removed property');
   assert.equal(sticky.removed, false);
 
   h.change(sticky);
   await h.flush();
 
-  assert.equal(sticky.x, CONTENT_X, '的に入って整列される');
+  assert.equal(sticky.x, CONTENT_X, 'is targeted and arranged');
 });
