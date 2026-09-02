@@ -90,6 +90,9 @@ let arrangeTimer: number | null = null;
 let pendingRowIds: string[] = [];
 let pendingAll = false;
 let pendingDelay = ARRANGE_DEBOUNCE_MS;
+// 行そのものが動かされた。行を重ねると相手の行の中身まで取り込まれるので、
+// このときだけ付箋を元の行へ返す。
+let pendingRowDrag = false;
 // 前回の整列時点で、どの付箋がどの行にいたか。付箋が行から出ていったとき、
 // 出ていった先の情報だけでは元の行が分からないので覚えておく。
 // 消えた付箋のぶんだけメモリに持つ。生きている付箋は plugin data 側が正。
@@ -128,8 +131,16 @@ function isTierRow(node: BaseNode): node is SectionNode {
   return node.type === 'SECTION' && node.getPluginData(TIER_FLAG_KEY) === '1';
 }
 
+// 色セルは持ち主の行 ID を持つ。行を別の行に重ねると、セクションが相手の
+// 中身を取り込んでしまう（色セルも付箋も）。持ち主が分からないと、盗られた
+// 色セルをその行のものと見なしてしまい、盗られた側は色セルを作り直す
+// ── 同じ名前の行が2つに見える。
 function isTierLabel(node: SceneNode): node is ShapeWithTextNode {
-  return node.type === 'SHAPE_WITH_TEXT' && node.getPluginData(TIER_LABEL_KEY) === '1';
+  return node.type === 'SHAPE_WITH_TEXT' && node.getPluginData(TIER_LABEL_KEY) !== '';
+}
+
+function labelOwner(node: SceneNode): string {
+  return node.getPluginData(TIER_LABEL_KEY);
 }
 
 function isBoardContainer(node: BaseNode): node is SectionNode {
@@ -365,6 +376,12 @@ function getBoards(): Board[] {
       if (row.getPluginData(TIER_BOARD_KEY) !== id) {
         row.setPluginData(TIER_BOARD_KEY, id);
       }
+      // 持ち主を持たせる前に作られた色セルは、今いる行のものとして扱う
+      for (const child of row.children) {
+        if (child.type === 'SHAPE_WITH_TEXT' && child.getPluginData(TIER_LABEL_KEY) === '1') {
+          child.setPluginData(TIER_LABEL_KEY, row.id);
+        }
+      }
     }
     return { id, container, rows };
   });
@@ -434,11 +451,73 @@ function boardOfRow(boards: Board[], rowId: string): Board | null {
 
 function findLabel(row: SectionNode): ShapeWithTextNode | null {
   for (const child of row.children) {
-    if (isTierLabel(child)) {
+    if (isTierLabel(child) && labelOwner(child) === row.id) {
       return child;
     }
   }
   return null;
+}
+
+// 他の行に盗られた付箋を元の行へ返す。行が動かされた直後だけ呼ぶ。
+// 人が付箋そのものを動かしたときは返してはいけない ── そのときは行は
+// 動いていないので、この関数は呼ばれない。
+function repatriateItems(board: Board): SectionNode[] {
+  const touched: SectionNode[] = [];
+  for (const row of board.rows) {
+    for (const item of itemsOf(row)) {
+      const home = item.getPluginData(ITEM_HOME_KEY);
+      if (home === '' || home === row.id) {
+        continue;
+      }
+      let owner: SectionNode | null = null;
+      for (const candidate of board.rows) {
+        if (candidate.id === home) {
+          owner = candidate;
+        }
+      }
+      if (owner === null) {
+        continue;
+      }
+      owner.appendChild(item);
+      if (touched.indexOf(owner) < 0) {
+        touched.push(owner);
+      }
+      if (touched.indexOf(row) < 0) {
+        touched.push(row);
+      }
+    }
+  }
+  return touched;
+}
+
+// 他の行に盗られた色セルを持ち主へ返す。持ち主が消えていれば捨てる。
+function repatriateLabels(board: Board): SectionNode[] {
+  const touched: SectionNode[] = [];
+  for (const row of board.rows) {
+    for (const child of row.children.slice()) {
+      if (!isTierLabel(child) || labelOwner(child) === row.id) {
+        continue;
+      }
+      let owner: SectionNode | null = null;
+      for (const candidate of board.rows) {
+        if (candidate.id === labelOwner(child)) {
+          owner = candidate;
+        }
+      }
+      if (owner === null) {
+        child.remove();
+      } else {
+        owner.appendChild(child);
+        if (touched.indexOf(owner) < 0) {
+          touched.push(owner);
+        }
+      }
+      if (touched.indexOf(row) < 0) {
+        touched.push(row);
+      }
+    }
+  }
+  return touched;
 }
 
 // ランキング対象。左端のティア名セルは含めない。
@@ -484,7 +563,7 @@ async function ensureLabel(row: SectionNode): Promise<ShapeWithTextNode> {
   }
   const label = figma.createShapeWithText();
   label.shapeType = 'SQUARE';
-  label.setPluginData(TIER_LABEL_KEY, '1');
+  label.setPluginData(TIER_LABEL_KEY, row.id);
   label.resize(LABEL_WIDTH, row.height);
   row.appendChild(label);
   label.x = 0;
@@ -726,8 +805,10 @@ async function arrangeRow(row: SectionNode, targetWidth: number): Promise<void> 
 // ただし次の場合は、指定が無くてもその盤面の行を全部並べ直す:
 //   - 盤面の幅が変わった（全行を同じ幅に揃える必要がある）
 //   - 色セルを持たない行がある（古い盤面の移行。中身の置き場所も変わる）
-async function arrangeBoards(targets: string[] | null): Promise<void> {
+async function arrangeBoards(targets: string[] | null, rowDragged: boolean): Promise<void> {
   for (const board of getBoards()) {
+    const returnedLabels = repatriateLabels(board);
+    const returnedItems = rowDragged ? repatriateItems(board) : [];
     const adopted = adoptStrays(board);
     const width = boardWidth(board.rows);
     let forceWhole = false;
@@ -738,7 +819,14 @@ async function arrangeBoards(targets: string[] | null): Promise<void> {
     }
     let touched = false;
     for (const row of board.rows) {
-      if (targets === null || forceWhole || adopted.indexOf(row) >= 0 || targets.indexOf(row.id) >= 0) {
+      if (
+        targets === null ||
+        forceWhole ||
+        adopted.indexOf(row) >= 0 ||
+        returnedLabels.indexOf(row) >= 0 ||
+        returnedItems.indexOf(row) >= 0 ||
+        targets.indexOf(row.id) >= 0
+      ) {
         await arrangeRow(row, width);
         touched = true;
       }
@@ -751,9 +839,11 @@ async function arrangeBoards(targets: string[] | null): Promise<void> {
 
 async function runArrange(): Promise<void> {
   const targets = pendingAll ? null : pendingRowIds;
+  const rowDragged = pendingRowDrag;
   pendingAll = false;
   pendingRowIds = [];
-  await arrangeBoards(targets);
+  pendingRowDrag = false;
+  await arrangeBoards(targets, rowDragged);
   postRows();
 }
 
@@ -1190,6 +1280,7 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
     // まとめて的にする。並べ替えは手を離してから。
     if (live !== null && isTierRow(live)) {
       delay = Math.max(delay, ROW_SETTLE_MS);
+      pendingRowDrag = true;
       const container = boardContainerOf(live);
       if (container !== null) {
         for (const child of container.children) {
