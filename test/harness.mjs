@@ -301,6 +301,16 @@ export function createHarness() {
     settle();
   }
 
+  // 盤面（外側のセクション）に直接ぶら下げる。FigJam が入れ子のうち外側に
+  // 付けた場合を再現する。settle は呼ばない（呼ぶと内側の行へ移ってしまう）。
+  function dropOnBoard(container, text, dx, dy) {
+    const sticky = createSticky(text, 0, 0);
+    container.appendChild(sticky);
+    sticky.x = dx;
+    sticky.y = dy;
+    return sticky;
+  }
+
   // 行の中の座標（左上からの相対）を指定して付箋を置く
   function dropIn(row, text, dx, dy) {
     const at = absolute(row);
@@ -429,6 +439,7 @@ export function createHarness() {
     label,
     createSticky,
     dropIn,
+    dropOnBoard,
     moveRowInto,
     settle,
     notifications,
