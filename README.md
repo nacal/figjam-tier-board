@@ -97,23 +97,49 @@ FigJam 上で Tier 表（tiermaker.com のようなランキング表）を作�
 
 ```sh
 npm install
-npm run build   # src/code.ts -> dist/code.js
-npm run watch   # 変更を監視してビルド
-npm test        # ビルドしてロジックのテストを実行
+npm run build      # 本番ビルド（minify あり）
+npm run watch      # 変更を監視してビルド
+npm test           # ビルドしてテストを実行
+npm run test:watch # 監視しながらテスト
+npm run typecheck  # src + test の型検査
 ```
 
-モックは実物の形に合わせること。ノードは消えていなくても `removed`（`false`）を持つ、付箋も plugin data を持つ ── といった細部がずれていると、そこに依存したバグをテストが素通りさせる。実際にこの2つで素通りした。
+Figma デスクトップアプリで **Plugins → Development → Import plugin from manifest…** から、ビルドで生成される `manifest.json` を選ぶ。外部通信は行わない（`networkAccess.allowedDomains: ["none"]`）。
 
-テストは `test/harness.mjs` で Figma Plugin API を最小限モックし、コンパイル済みの `dist/code.js` を `vm` で読み込んで UI からのメッセージで駆動する。セクションが重なったノードを自動的に子にする挙動（入れ子も含む）も近似してあるので、付箋の所属判定・左寄せ整列・行削除時の退避・表ごとの移動を Figma なしで確かめられる。
+### 技術スタック
 
-Figma デスクトップアプリで **Plugins → Development → Import plugin from manifest…** から `manifest.json` を選ぶ。外部通信は行わない（`networkAccess.allowedDomains: ["none"]`）。
+[create-figma-plugin](https://yuanqing.github.io/create-figma-plugin/)（esbuild）でビルドする。素の `tsc` + `module: "none"` だと `import` が書けず、ドメインをモジュールに分けられない。
+
+- **main**（`src/main.ts`）— Figma のノードを読み書きするアダプタ層。`export default` した関数が呼ばれる規約
+- **domain**（`src/domain/*`）— Figma に触らない純粋な部分。矩形の並びを受け取って置き場所を返す
+- **UI**（`src/ui.tsx`）— Preact ＋ `@create-figma-plugin/ui`。配色は Figma のテーマ変数（`--figma-color-*`）に乗る
+- **イベント**（`src/events.ts`）— main と UI のあいだのイベント名とペイロードを1箇所で宣言。`emit` / `on` に型が付く
+
+`manifest.json` はビルド生成物。設定は `package.json` の `figma-plugin` キー。
+
+### テスト
+
+2層に分かれている。
+
+**ドメインのテスト**（`test/domain/*`）はモックが要らない。矩形を渡して矩形が返るだけなので、23件が 7ms で終わる。整列が収束すること、段の判定が背の高さに影響されないことは、ここで直接固定してある。
+
+**アダプタのテスト**（`test/*.test.ts`）は `test/harness.ts` で Figma Plugin API を最小限モックし、ビルド済みの `build/main.js` を `vm` で読み込んで UI からのイベントで駆動する。セクションが重なったノードを自動的に子にする挙動（入れ子も含む）も近似してあるので、付箋の所属判定・行削除時の退避・表ごとの移動を Figma なしで確かめられる。
+
+**モックは実物の形に合わせること。** ノードは消えていなくても `removed`（`false`）を持つ、付箋も plugin data を持つ ── といった細部がずれていると、そこに依存したバグをテストが素通りさせる。実際にこの2つで素通りした。`harness.ts` の `ModeledSceneProps` に挙げたプロパティは実物の型と突き合わせてあるので、モックから落とすとコンパイルで落ちる。
 
 ## 構成
 
 ```
-manifest.json        プラグイン定義（editorType: figjam）
-ui.html              パネル UI（バニラ JS）
-src/code.ts          メインスレッド。セクションの生成・配置・整列・削除
-test/harness.mjs     Figma Plugin API のモック
-test/*.test.mjs      整列・幅・並べ替え・複数盤面・名前・移行・収束性
+package.json          figma-plugin キーに manifest の設定
+src/main.ts           Figma のノードを読み書きするアダプタ層
+src/domain/layout.ts  読み順と折り返し（純粋）
+src/domain/order.ts   行の並び順・幅の決定・行の名前（純粋）
+src/domain/queue.ts   次の整列で何を待って並べ直すか（純粋）
+src/domain/color.ts   色（純粋）
+src/events.ts         main ↔ UI のイベント宣言
+src/ui.tsx            パネル UI（Preact）
+src/ui.css            Tier 表に固有の見た目
+test/harness.ts       Figma Plugin API のモック
+test/domain/*.test.ts ドメインのテスト（モックなし）
+test/*.test.ts        アダプタのテスト（ハーネス経由）
 ```
