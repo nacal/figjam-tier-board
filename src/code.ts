@@ -166,9 +166,25 @@ function makeContainer(id: string, x: number, y: number, width: number, height: 
   return container;
 }
 
-// 盤面のセクションに入っていないティア行を拾って、包み直す。盤面を包む前に
-// 作られた盤面も、これで表ごと動かせるようになる。
+// 盤面のセクションに入っていないティア行を拾う。
+//
+// 行だけをキャンバスへ持ち出せてしまうと表が壊れるので、元の盤面が残っていれば
+// そこへ戻す。行はロックできない ── ロックは子にも効くので、行をロックすると
+// 中の付箋を掴めなくなり、並べる操作そのものができなくなる。
+//
+// 戻すときの高さは落とした位置のまま。行の順序はキャンバス上の並びが正なので、
+// 行を上下へドラッグすれば、そのまま並べ替えになる。
+//
+// 元の盤面が無い行（盤面を包む前のバージョンで作られた表）は、新しく器を作って
+// まとめて包む。
 function wrapLooseRows(): void {
+  const containers: { [id: string]: SectionNode } = {};
+  for (const section of allSections()) {
+    if (isBoardContainer(section)) {
+      containers[section.getPluginData(TIER_BOARD_KEY)] = section;
+    }
+  }
+
   const loose: SectionNode[] = [];
   for (const section of allSections()) {
     if (isTierRow(section) && (section.parent === null || !isBoardContainer(section.parent))) {
@@ -179,12 +195,36 @@ function wrapLooseRows(): void {
     return;
   }
 
+  const returned: SectionNode[] = [];
+  const orphans: SectionNode[] = [];
+  for (const row of loose) {
+    const container = containers[row.getPluginData(TIER_BOARD_KEY)];
+    if (container === undefined) {
+      orphans.push(row);
+      continue;
+    }
+    const pos = pagePosition(row);
+    container.appendChild(row);
+    row.x = 0;
+    row.y = pos.y - container.y;
+    if (returned.indexOf(container) < 0) {
+      returned.push(container);
+    }
+  }
+  for (const container of returned) {
+    relayout(container, rowsOfContainer(container));
+  }
+
+  if (orphans.length === 0) {
+    return;
+  }
+
   const grouped: { [id: string]: SectionNode[] } = {};
   const order: string[] = [];
   // 盤面 ID を持たない行は、複数盤面に対応する前に作られたもの。当時は
   // ページにひとつしか作れなかったので、まとめてひとつの盤面として扱う。
   let legacyId = '';
-  for (const row of loose) {
+  for (const row of orphans) {
     let id = row.getPluginData(TIER_BOARD_KEY);
     if (id === '') {
       if (legacyId === '') {
@@ -227,11 +267,23 @@ function wrapLooseRows(): void {
     for (const node of figma.currentPage.children.slice()) {
       if (node.type === 'TEXT' && node.getPluginData(TIER_TITLE_KEY) === id) {
         container.appendChild(node);
+        node.setPluginData(TIER_TITLE_KEY, '1');
         node.x = 0;
         node.y = 0;
       }
     }
   }
+}
+
+function rowsOfContainer(container: SectionNode): SectionNode[] {
+  const rows: SectionNode[] = [];
+  for (const child of container.children) {
+    if (isTierRow(child)) {
+      rows.push(child);
+    }
+  }
+  rows.sort((a, b) => a.y - b.y);
+  return rows;
 }
 
 // 盤面ごとのまとまり。並びは、上にある盤面から。
@@ -243,23 +295,32 @@ function getBoards(): Board[] {
       containers.push(section);
     }
   }
-  containers.sort((a, b) => pagePosition(a).y - pagePosition(b).y);
+  containers.sort((a, b) => a.y - b.y);
   return containers.map((container) => {
-    const rows: SectionNode[] = [];
-    for (const child of container.children) {
-      if (isTierRow(child)) {
-        rows.push(child);
+    const id = container.getPluginData(TIER_BOARD_KEY);
+    const rows = rowsOfContainer(container);
+    for (const row of rows) {
+      // 別の盤面へドラッグされた行は、移した先の盤面のものになる
+      if (row.getPluginData(TIER_BOARD_KEY) !== id) {
+        row.setPluginData(TIER_BOARD_KEY, id);
       }
     }
-    rows.sort((a, b) => a.y - b.y);
-    return { id: container.getPluginData(TIER_BOARD_KEY), container, rows };
+    return { id, container, rows };
   });
 }
 
+// 盤面の名前は器に持たせる。行に持たせると、行を別の盤面へ移したときに
+// 名前まで付いていってしまう。
 function boardName(board: Board): string {
+  const stored = board.container.getPluginData(TIER_BOARD_NAME_KEY);
+  if (stored !== '') {
+    return stored;
+  }
+  // 器に名前を持たせる前のバージョンで付けた名前を拾う
   for (const row of board.rows) {
     const name = row.getPluginData(TIER_BOARD_NAME_KEY);
     if (name !== '') {
+      board.container.setPluginData(TIER_BOARD_NAME_KEY, name);
       return name;
     }
   }
@@ -884,8 +945,9 @@ async function setBoardName(boardId: string, rawName: string): Promise<void> {
     return;
   }
   const name = rawName.trim();
+  board.container.setPluginData(TIER_BOARD_NAME_KEY, name);
   for (const row of board.rows) {
-    row.setPluginData(TIER_BOARD_NAME_KEY, name);
+    row.setPluginData(TIER_BOARD_NAME_KEY, '');
   }
   board.container.name = name !== '' ? name : 'Tier表';
 
