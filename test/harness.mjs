@@ -186,6 +186,11 @@ export function createHarness() {
     on(type, callback) {
       globalListeners.push({ type, callback });
     },
+    documentListeners() {
+      return globalListeners
+        .filter((l) => l.type === 'documentchange')
+        .map((l) => l.callback);
+    },
     root: { children: [page] },
     viewport: {
       center: { x: 0, y: 0 },
@@ -351,17 +356,42 @@ export function createHarness() {
   // デバウンス付きで整列するので、待つときは flush を使う。
   function change(nodes) {
     const list = Array.isArray(nodes) ? nodes : [nodes];
-    for (const listener of page.listeners) {
-      if (listener.type !== 'nodechange') continue;
-      listener.callback({
-        nodeChanges: list.map((node) => ({
-          type: 'PROPERTY_CHANGE',
-          id: node.id,
-          origin: 'LOCAL',
-          node,
-          properties: ['x'],
-        })),
-      });
+    const entries = list.map((node) => ({
+      type: 'PROPERTY_CHANGE',
+      id: node.id,
+      origin: 'LOCAL',
+      node,
+      properties: ['x'],
+    }));
+    // 実機と同じく、両方の経路から届く場合を再現する
+    deliver(entries, 'both');
+  }
+
+  // 片方の経路だけが生きている場合を再現する
+  function changeVia(channel, nodes) {
+    const list = Array.isArray(nodes) ? nodes : [nodes];
+    deliver(
+      list.map((node) => ({
+        type: 'PROPERTY_CHANGE',
+        id: node.id,
+        origin: 'LOCAL',
+        node,
+        properties: ['x'],
+      })),
+      channel,
+    );
+  }
+
+  function deliver(entries, channel) {
+    if (channel === 'both' || channel === 'nodechange') {
+      for (const listener of page.listeners) {
+        if (listener.type === 'nodechange') listener.callback({ nodeChanges: entries });
+      }
+    }
+    if (channel === 'both' || channel === 'documentchange') {
+      for (const listener of globalListeners) {
+        if (listener.type === 'documentchange') listener.callback({ documentChanges: entries });
+      }
     }
   }
 
@@ -429,6 +459,7 @@ export function createHarness() {
     send,
     restart,
     change,
+    changeVia,
     flush,
     select,
     rows,
