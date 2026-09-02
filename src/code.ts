@@ -19,6 +19,8 @@ const TIER_TITLE_KEY = 'figjamTierTitle';
 const BOARD_FLAG_KEY = 'figjamTierBoardSection';
 // 付箋が最後にいた行。行から出ていった付箋の元の行を知るために使う。
 const ITEM_HOME_KEY = 'figjamTierHome';
+// 行の順番。キャンバス上の位置ではなくこれが正。ドラッグでは変わらない。
+const TIER_INDEX_KEY = 'figjamTierIndex';
 const TIER_LABEL_KEY = 'figjamTierLabel';
 const AUTO_ARRANGE_KEY = 'autoArrange';
 
@@ -50,6 +52,8 @@ const TITLE_FILL: RGB = { r: 0.95, g: 0.95, b: 0.95 };
 
 // ドラッグ中に整列が割り込むと掴んでいる付箋が飛ぶので、変更が落ち着いてから走らせる。
 const ARRANGE_DEBOUNCE_MS = 320;
+// 行そのものが動いたときは待たずに戻す。行は動かせない、という手触りにする。
+const ROW_SNAPBACK_MS = 80;
 
 const DEFAULT_TIERS: Array<{ name: string; color: string }> = [
   { name: 'S', color: 'red' },
@@ -85,6 +89,7 @@ let arrangeTimer: number | null = null;
 // 次の整列で触る行。触っていない行の中身まで並び直さないための的。
 let pendingRowIds: string[] = [];
 let pendingAll = false;
+let pendingDelay = ARRANGE_DEBOUNCE_MS;
 // 前回の整列時点で、どの付箋がどの行にいたか。付箋が行から出ていったとき、
 // 出ていった先の情報だけでは元の行が分からないので覚えておく。
 // 消えた付箋のぶんだけメモリに持つ。生きている付箋は plugin data 側が正。
@@ -208,10 +213,10 @@ function wrapLooseRows(): void {
       orphans.push(row);
       continue;
     }
-    const pos = pagePosition(row);
     container.appendChild(row);
     row.x = 0;
-    row.y = pos.y - container.y;
+    // 位置は relayout が順番どおりに置き直す。落とした高さは order に影響しない。
+    row.y = 0;
     if (returned.indexOf(container) < 0) {
       returned.push(container);
     }
@@ -328,6 +333,8 @@ function adoptStrays(board: Board): SectionNode[] {
   return touched;
 }
 
+// 行の順番は plugin data に持つ。キャンバス上の位置で決めると、行をドラッグ
+// しただけで順番が変わってしまう。順番を変えるのはパネルからだけにする。
 function rowsOfContainer(container: SectionNode): SectionNode[] {
   const rows: SectionNode[] = [];
   for (const child of container.children) {
@@ -335,7 +342,27 @@ function rowsOfContainer(container: SectionNode): SectionNode[] {
       rows.push(child);
     }
   }
-  rows.sort((a, b) => a.y - b.y);
+
+  let unnumbered = false;
+  for (const row of rows) {
+    if (row.getPluginData(TIER_INDEX_KEY) === '') {
+      unnumbered = true;
+    }
+  }
+  if (unnumbered) {
+    // 順番を持たない行（順番を持たせる前に作られた盤面、他の盤面から移して
+    // きた行）は、今の見た目の順で採番する
+    rows.sort((a, b) => a.y - b.y);
+    rows.forEach((row, index) => {
+      row.setPluginData(TIER_INDEX_KEY, String(index));
+    });
+    return rows;
+  }
+
+  rows.sort(
+    (a, b) =>
+      parseFloat(a.getPluginData(TIER_INDEX_KEY)) - parseFloat(b.getPluginData(TIER_INDEX_KEY)),
+  );
   return rows;
 }
 
@@ -434,12 +461,17 @@ function findLabel(row: SectionNode): ShapeWithTextNode | null {
 }
 
 // ランキング対象。左端のティア名セルは含めない。
+//
+// 行や盤面のセクションも除く。行を別の行の上にドロップすると FigJam が行を
+// 行の子にすることがあり、そのまま数えると行そのものを付箋として左寄せに
+// 詰めはじめる。
 function itemsOf(row: SectionNode): SceneNode[] {
   const items: SceneNode[] = [];
   for (const child of row.children) {
-    if (!isTierLabel(child)) {
-      items.push(child);
+    if (isTierLabel(child) || isTierRow(child) || isBoardContainer(child) || isTitle(child)) {
+      continue;
     }
+    items.push(child);
   }
   return items;
 }
@@ -560,12 +592,16 @@ function relayout(container: SectionNode, rows: SectionNode[]): void {
     remember(title);
   }
   let cursorY = titleBlock;
-  for (const row of rows) {
+  rows.forEach((row, index) => {
     row.x = 0;
     row.y = cursorY;
     cursorY += row.height + ROW_GAP;
+    // 渡された順番をそのまま正として書き戻す。番号の重複もこれで解ける。
+    if (row.getPluginData(TIER_INDEX_KEY) !== String(index)) {
+      row.setPluginData(TIER_INDEX_KEY, String(index));
+    }
     remember(row);
-  }
+  });
 
   if (neededWidth !== container.width || neededHeight !== container.height) {
     container.resizeWithoutConstraints(neededWidth, neededHeight);
@@ -788,14 +824,17 @@ function rowIdOf(node: BaseNode): string | null {
   return null;
 }
 
-function scheduleArrange(): void {
+function scheduleArrange(delay: number): void {
+  pendingDelay = Math.min(pendingDelay, delay);
   if (arrangeTimer !== null) {
     clearTimeout(arrangeTimer);
   }
+  const wait = pendingDelay;
   arrangeTimer = setTimeout(() => {
     arrangeTimer = null;
+    pendingDelay = ARRANGE_DEBOUNCE_MS;
     void runArrange();
-  }, ARRANGE_DEBOUNCE_MS);
+  }, wait);
 }
 
 function postRows(): void {
@@ -868,7 +907,7 @@ async function createBoard(): Promise<void> {
   for (const row of created) {
     markRow(row.id);
   }
-  scheduleArrange();
+  scheduleArrange(ARRANGE_DEBOUNCE_MS);
   figma.viewport.scrollAndZoomIntoView([container]);
 }
 
@@ -897,7 +936,7 @@ async function addRow(): Promise<void> {
   const row = await createRow(board.container, nextRowName(board.rows), FALLBACK_COLOR_KEY, y);
   row.resizeWithoutConstraints(boardWidth(board.rows), ROW_HEIGHT);
   markRow(row.id);
-  scheduleArrange();
+  scheduleArrange(ARRANGE_DEBOUNCE_MS);
   figma.viewport.scrollAndZoomIntoView([row]);
 }
 
@@ -1132,6 +1171,7 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
     return;
   }
   let marked = false;
+  let delay = ARRANGE_DEBOUNCE_MS;
   for (const change of changes) {
     if (change.origin !== 'LOCAL') {
       continue;
@@ -1167,6 +1207,21 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
       marked = true;
     }
 
+    // 行そのものが動かされた。順番は plugin data が正なので、待たずに
+    // 元のスロットへ戻す。
+    if (live !== null && isTierRow(live)) {
+      delay = Math.min(delay, ROW_SNAPBACK_MS);
+      const container = boardContainerOf(live);
+      if (container !== null) {
+        for (const child of container.children) {
+          if (isTierRow(child)) {
+            markRow(child.id);
+          }
+        }
+      }
+      marked = true;
+    }
+
     // 行には入らなかったが盤面の中にはいるノード（FigJam が外側のセクションに
     // 付けた付箋）と、元の行が分からないまま親をまたいだ付箋は、どこの行が
     // 変わったのか特定できない。その盤面の行をまとめて的にする。
@@ -1184,7 +1239,7 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
     }
   }
   if (marked) {
-    scheduleArrange();
+    scheduleArrange(delay);
   }
 }
 
