@@ -131,6 +131,10 @@ export function createHarness() {
         this.width = width;
         this.height = height;
       },
+      remove() {
+        this.removed = true;
+        detach(this);
+      },
     };
   }
 
@@ -422,12 +426,23 @@ export function createHarness() {
     return message === undefined ? undefined : JSON.parse(JSON.stringify(message));
   }
 
+  // 色セルは持ち主の行 ID を持つ（空でなければ色セル）
   function items(row) {
-    return row.children.filter((child) => child.getPluginData?.('figjamTierLabel') !== '1');
+    return row.children.filter(
+      (child) =>
+        (child.getPluginData?.('figjamTierLabel') ?? '') === '' &&
+        child.getPluginData?.('figjamTierRow') !== '1' &&
+        child.getPluginData?.('figjamTierBoardSection') !== '1' &&
+        child.getPluginData?.('figjamTierTitle') !== '1',
+    );
   }
 
   function label(row) {
-    return row.children.find((child) => child.getPluginData?.('figjamTierLabel') === '1') ?? null;
+    return (
+      row.children.find(
+        (child) => (child.getPluginData?.('figjamTierLabel') ?? '') !== '',
+      ) ?? null
+    );
   }
 
   // 盤面（行を包むセクション）を上から順に
