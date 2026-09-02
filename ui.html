@@ -141,6 +141,14 @@
   .palette button[aria-pressed="true"] { outline: 2px solid var(--accent); outline-offset: 1px; }
   .empty { padding: 24px 8px; text-align: center; color: var(--muted); }
   footer { margin-top: 12px; color: var(--muted); }
+  .status {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    word-break: break-all;
+  }
+  .status.bad { color: #e03e3e; }
 </style>
 </head>
 <body>
@@ -164,6 +172,7 @@
   </div>
 
   <div id="list"></div>
+  <div class="status" id="status"></div>
   <footer>付箋は FigJam の素の機能で作り、行にドラッグして並べてください。行の順序は ⠿ をドラッグして入れ替えます。どれか1行の右端を引っ張ると、その盤面の幅が変わります。盤面はいくつでも作れます。</footer>
 
 <script>
@@ -361,6 +370,16 @@
     return palette;
   }
 
+  function renderStatus(subscriptions) {
+    var status = document.getElementById('status');
+    var ok = subscriptions.filter(function (s) { return s.indexOf('失敗') < 0; });
+    status.className = ok.length > 0 ? 'status' : 'status bad';
+    status.textContent =
+      ok.length > 0
+        ? 'キャンバスの変更を購読中: ' + subscriptions.join(' / ')
+        : 'キャンバスの変更を購読できていません: ' + (subscriptions.join(' / ') || '(なし)');
+  }
+
   function iconButton(label, title, disabled, handler) {
     var button = document.createElement('button');
     button.className = 'icon';
@@ -409,6 +428,7 @@
     activeBoardId = message.activeBoardId;
     rows = message.rows;
     document.getElementById('auto').checked = message.autoArrange;
+    renderStatus(message.subscriptions || []);
     render();
   };
 
