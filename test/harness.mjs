@@ -49,6 +49,7 @@ export function createHarness() {
     y: 0,
     selection: [],
     listeners: [],
+    async loadAsync() {},
     on(type, callback) {
       this.listeners.push({ type, callback });
     },
@@ -225,9 +226,22 @@ export function createHarness() {
     },
   };
 
-  const sandbox = { figma, __html__: '<html></html>', setTimeout, clearTimeout, Date, Math, Infinity, console };
   const code = readFileSync(new URL('../dist/code.js', import.meta.url), 'utf8');
-  runInNewContext(code, sandbox);
+
+  function boot() {
+    const sandbox = { figma, __html__: '<html></html>', setTimeout, clearTimeout, Date, Math, Infinity, console };
+    runInNewContext(code, sandbox);
+  }
+
+  // プラグインを開き直す。前回の実行が覚えていたこと（整列が最後に書いた位置、
+  // どの付箋がどの行にいたか）は失われ、イベントの購読も張り直しになる。
+  function restart() {
+    page.listeners.length = 0;
+    globalListeners.length = 0;
+    boot();
+  }
+
+  boot();
 
   // FigJam のセクションは、重なったノードを自動的に子にする。中心が入って
   // いれば取り込み、外に出れば手放す、として近似する。盤面のセクションの中に
@@ -306,6 +320,13 @@ export function createHarness() {
       width: 240,
       height: 240,
       parent: null,
+      pluginData: {},
+      getPluginData(key) {
+        return this.pluginData[key] ?? '';
+      },
+      setPluginData(key, value) {
+        this.pluginData[key] = value;
+      },
     };
     page.appendChild(sticky);
     return sticky;
@@ -396,6 +417,7 @@ export function createHarness() {
     figma,
     page,
     send,
+    restart,
     change,
     flush,
     select,
