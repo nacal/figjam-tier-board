@@ -44,11 +44,12 @@
   button.primary:hover:not(:disabled) { background: #0b87e3; }
   .boards {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: 6px;
     margin-top: 10px;
   }
-  .boards select {
+  .boards select,
+  .boards input {
     flex: 1 1 auto;
     min-width: 0;
     font: inherit;
@@ -151,6 +152,7 @@
 
   <div class="boards" id="boardBar" hidden>
     <select id="board" title="操作する盤面"></select>
+    <input id="boardName" type="text" placeholder="盤面の名前（キャンバスに見出しが出ます）">
   </div>
 
   <div class="options">
@@ -200,15 +202,27 @@
   function renderBoards() {
     var bar = document.getElementById('boardBar');
     var select = document.getElementById('board');
-    bar.hidden = boards.length < 2;
+    var nameField = document.getElementById('boardName');
+
+    bar.hidden = boards.length === 0;
+    // 盤面がひとつだけなら切り替え先が無いので、セレクタは出さない。
+    select.hidden = boards.length < 2;
+
     select.innerHTML = '';
+    var active = null;
     boards.forEach(function (board) {
+      if (board.id === activeBoardId) active = board;
       var option = document.createElement('option');
       option.value = board.id;
       option.textContent = board.label + '（' + board.rowCount + '行）';
       option.selected = board.id === activeBoardId;
       select.appendChild(option);
     });
+
+    // 入力中に書き戻すとカーソルが飛ぶ
+    if (document.activeElement !== nameField) {
+      nameField.value = active ? active.name : '';
+    }
   }
 
   function render() {
@@ -369,6 +383,13 @@
   };
   document.getElementById('arrange').onclick = function () {
     post({ type: 'arrange-now' });
+  };
+  document.getElementById('boardName').onchange = function (event) {
+    if (!activeBoardId) return;
+    post({ type: 'set-board-name', boardId: activeBoardId, name: event.target.value });
+  };
+  document.getElementById('boardName').onkeydown = function (event) {
+    if (event.key === 'Enter') event.target.blur();
   };
   document.getElementById('board').onchange = function (event) {
     activeBoardId = event.target.value;
