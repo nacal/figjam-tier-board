@@ -55,6 +55,9 @@ const TIER_TITLE_KEY = 'figjamTierTitle';
 // The section that wraps a whole board; grabbing it moves the table.
 const BOARD_FLAG_KEY = 'figjamTierBoardSection';
 const TIER_THEME_KEY = 'figjamTierTheme';
+// The size the last arrange wrote to a board, so a resize by hand can be spotted.
+const BOARD_SIZE_KEY = 'figjamTierBoardSize';
+const ROW_HEIGHT_KEY = 'figjamTierRowHeight';
 // The row a sticky last belonged to, so a sticky that leaves can be traced back.
 const ITEM_HOME_KEY = 'figjamTierHome';
 const TIER_LABEL_KEY = 'figjamTierLabel';
@@ -76,13 +79,35 @@ const ROW_GAP = 0;
 const ROW_WIDTH =
   LABEL_WIDTH + ITEM_PADDING * 2 + ITEM_WIDTH * DEFAULT_COLUMNS + ITEM_GAP * (DEFAULT_COLUMNS - 1);
 const BOARD_MARGIN = 160;
-const ROW_METRICS: RowMetrics = {
-  labelWidth: LABEL_WIDTH,
-  padding: ITEM_PADDING,
-  gap: ITEM_GAP,
-  minHeight: ROW_HEIGHT,
-  lineTolerance: LINE_TOLERANCE,
-};
+// Rows only have to clear their own contents, so an empty board shrinks to this
+// while one holding stickies stops at whatever they need. Clamping to the height
+// of a sticky either way would leave shrinking barely distinguishable from
+// snapping back to the default.
+const MIN_ROW_HEIGHT = 96;
+
+// The tier letter is sized against its cell, so shrinking a board does not leave
+// oversized letters behind.
+const LABEL_FONT_RATIO = 0.32;
+
+function labelFontSize(rowHeight: number): number {
+  return Math.max(12, Math.round(rowHeight * LABEL_FONT_RATIO));
+}
+
+// The tier label is a square whose side is the row height, so making rows taller
+// scales the labels with them and the board reads as zoomed rather than stretched.
+function metricsFor(rowHeight: number): RowMetrics {
+  return {
+    labelWidth: rowHeight,
+    padding: ITEM_PADDING,
+    gap: ITEM_GAP,
+    minHeight: rowHeight,
+    lineTolerance: LINE_TOLERANCE,
+  };
+}
+
+function minBoardWidth(rowHeight: number): number {
+  return rowHeight + ITEM_PADDING * 2 + ITEM_WIDTH;
+}
 
 const RESCUE_MARGIN = 80;
 const TITLE_FONT_SIZE = 72;
@@ -120,6 +145,14 @@ let subscriptions: string[] = [];
 // echoes apart from a person's edit by value beats ignoring a window of time —
 // a window drops every sticky moved inside it.
 let written: { [nodeId: string]: string } = {};
+// Board sizes read straight off the change event.
+//
+// A big shrink pushes the lower rows out of the section, and returning those
+// strays resizes the container back to fit them — before the arrange ever gets
+// to look at it. Reading the size when the change arrives is the only point at
+// which the size the user dragged to still exists. Without this, small drags
+// work and large ones appear to do nothing at all.
+let resizedBoards: { [boardId: string]: { width: number; height: number } } = {};
 
 function isTierRow(node: BaseNode): node is SectionNode {
   return node.type === 'SECTION' && node.getPluginData(TIER_FLAG_KEY) === '1';
@@ -587,19 +620,36 @@ async function ensureLabel(row: SectionNode): Promise<ShapeWithTextNode> {
   label.y = 0;
   // Locked, or it would look like something to rank.
   label.locked = true;
-  await writeLabelText(label, row.name);
+  await writeLabelText(label, row.name, row.height);
   applyColor(row, row.getPluginData(TIER_COLOR_KEY) || FALLBACK_COLOR_KEY);
   return label;
 }
 
-async function writeLabelText(label: ShapeWithTextNode, text: string): Promise<void> {
+async function writeLabelText(
+  label: ShapeWithTextNode,
+  text: string,
+  rowHeight: number,
+): Promise<void> {
   const fontName = label.text.fontName;
   if (typeof fontName === 'symbol') {
     return;
   }
   await figma.loadFontAsync(fontName);
   label.text.characters = text;
-  label.text.fontSize = 96;
+  label.text.fontSize = labelFontSize(rowHeight);
+}
+
+async function fitLabelText(label: ShapeWithTextNode, rowHeight: number): Promise<void> {
+  const size = labelFontSize(rowHeight);
+  if (label.text.fontSize === size) {
+    return;
+  }
+  const fontName = label.text.fontName;
+  if (typeof fontName === 'symbol') {
+    return;
+  }
+  await figma.loadFontAsync(fontName);
+  label.text.fontSize = size;
 }
 
 function applyColor(row: SectionNode, key: string): void {
@@ -616,6 +666,7 @@ async function createRow(
   name: string,
   colorKey: string,
   y: number,
+  size: { width: number; rowHeight: number } = { width: ROW_WIDTH, rowHeight: ROW_HEIGHT },
 ): Promise<SectionNode> {
   const boardId = container.getPluginData(TIER_BOARD_KEY);
   const row = figma.createSection();
@@ -623,7 +674,7 @@ async function createRow(
   row.setPluginData(TIER_FLAG_KEY, '1');
   row.setPluginData(TIER_BOARD_KEY, boardId);
   row.setPluginData(TIER_COLOR_KEY, colorKey);
-  row.resizeWithoutConstraints(ROW_WIDTH, ROW_HEIGHT);
+  row.resizeWithoutConstraints(size.width, size.rowHeight);
   applyRowChrome(row, boardThemeOf(container));
   container.appendChild(row);
   row.x = 0;
@@ -636,9 +687,14 @@ async function createRow(
 //
 // Every position is relative to the board section and the board itself is never
 // moved, so reordering leaves the table where it is, including where a user dragged it.
+function titleBlockOf(container: SectionNode): number {
+  const title = findTitle(container);
+  return title !== null ? title.height + TITLE_GAP : 0;
+}
+
 function relayout(container: SectionNode, rows: SectionNode[]): void {
   const title = findTitle(container);
-  const titleBlock = title !== null ? title.height + TITLE_GAP : 0;
+  const titleBlock = titleBlockOf(container);
 
   let neededWidth = 0;
   let neededHeight = titleBlock;
@@ -685,7 +741,57 @@ function relayout(container: SectionNode, rows: SectionNode[]): void {
   if (neededWidth !== container.width || neededHeight !== container.height) {
     container.resizeWithoutConstraints(neededWidth, neededHeight);
   }
+  container.setPluginData(BOARD_SIZE_KEY, `${container.width}:${container.height}`);
   remember(container);
+}
+
+interface BoardSizing {
+  width: number;
+  rowHeight: number;
+}
+
+function storedPair(container: SectionNode, key: string): number[] | null {
+  const parts = container.getPluginData(key).split(':').map(parseFloat);
+  return parts.length === 2 && parts.every(isFinite) ? parts : null;
+}
+
+// The board's own size wins over the per-row width, because dragging the board's
+// corner is the more direct gesture; the row edge still works when that is what
+// the user happened to grab.
+//
+// Height is spread evenly across the rows. Rows never go below MIN_ROW_HEIGHT,
+// and layoutRow keeps whatever its contents need, so shrinking has a floor.
+function boardSizing(board: Board, titleBlock: number): BoardSizing {
+  const container = board.container;
+  const rowCount = Math.max(board.rows.length, 1);
+
+  const storedRowHeight = parseFloat(container.getPluginData(ROW_HEIGHT_KEY));
+  let rowHeight = isFinite(storedRowHeight) ? storedRowHeight : ROW_HEIGHT;
+  let width = boardWidth(board.rows);
+
+  const stored = storedPair(container, BOARD_SIZE_KEY);
+  const dragged = resizedBoards[board.id];
+  const actual = dragged !== undefined ? dragged : { width: container.width, height: container.height };
+  if (stored !== null) {
+    if (Math.abs(stored[0] - actual.width) > 0.5) {
+      width = actual.width;
+    }
+    if (Math.abs(stored[1] - actual.height) > 0.5) {
+      const available = actual.height - titleBlock - ROW_GAP * (rowCount - 1);
+      rowHeight = available / rowCount;
+    }
+  }
+
+  // Rows stay uniform, so the floor is whatever the tallest row's contents need.
+  let contentFloor = MIN_ROW_HEIGHT;
+  for (const row of board.rows) {
+    for (const item of itemsOf(row)) {
+      contentFloor = Math.max(contentFloor, ITEM_PADDING * 2 + item.height);
+    }
+  }
+
+  rowHeight = Math.max(Math.round(rowHeight), contentFloor);
+  return { width: Math.max(Math.round(width), minBoardWidth(rowHeight)), rowHeight };
 }
 
 function boardWidth(rows: SectionNode[]): number {
@@ -700,10 +806,15 @@ function boardWidth(rows: SectionNode[]): number {
 
 // Packs a row from the top left in reading order, so where a sticky was dropped is
 // its rank and it trades places with whatever it landed on.
-async function arrangeRow(row: SectionNode, targetWidth: number, theme: BoardTheme): Promise<void> {
+async function arrangeRow(
+  row: SectionNode,
+  targetWidth: number,
+  theme: BoardTheme,
+  metrics: RowMetrics,
+): Promise<void> {
   applyRowChrome(row, theme);
   const label = await ensureLabel(row);
-  const layout = layoutRow(itemsOf(row), targetWidth, ROW_METRICS);
+  const layout = layoutRow(itemsOf(row), targetWidth, metrics);
   const needed = layout.height;
 
   // Grow before placing, shrink after. Shrinking first drops stickies and labels
@@ -714,9 +825,10 @@ async function arrangeRow(row: SectionNode, targetWidth: number, theme: BoardThe
     row.resizeWithoutConstraints(grownWidth, grownHeight);
   }
 
-  label.resize(LABEL_WIDTH, needed);
+  label.resize(metrics.labelWidth, needed);
   label.x = 0;
   label.y = 0;
+  await fitLabelText(label, metrics.labelWidth);
 
   layout.items.forEach((item, index) => {
     item.x = layout.placements[index].x;
@@ -751,10 +863,16 @@ async function arrangeBoards(targets: string[] | null, rowDragged: boolean): Pro
     const returnedLabels = repatriateLabels(board);
     const returnedItems = rowDragged ? repatriateItems(board) : [];
     const adopted = adoptStrays(board);
-    const width = boardWidth(board.rows);
+    const sizing = boardSizing(board, titleBlockOf(board.container));
+    const metrics = metricsFor(sizing.rowHeight);
+    const width = sizing.width;
     let forceWhole = false;
     for (const row of board.rows) {
-      if (Math.abs(row.width - width) > 0.5 || findLabel(row) === null) {
+      if (
+        Math.abs(row.width - width) > 0.5 ||
+        Math.abs(row.height - sizing.rowHeight) > 0.5 ||
+        findLabel(row) === null
+      ) {
         forceWhole = true;
       }
     }
@@ -768,11 +886,12 @@ async function arrangeBoards(targets: string[] | null, rowDragged: boolean): Pro
         returnedItems.indexOf(row) >= 0 ||
         targets.indexOf(row.id) >= 0
       ) {
-        await arrangeRow(row, width, theme);
+        await arrangeRow(row, width, theme, metrics);
         touched = true;
       }
     }
     if (touched) {
+      board.container.setPluginData(ROW_HEIGHT_KEY, String(sizing.rowHeight));
       relayout(board.container, board.rows);
     }
   }
@@ -781,6 +900,7 @@ async function arrangeBoards(targets: string[] | null, rowDragged: boolean): Pro
 async function runArrange(): Promise<void> {
   const request = queue.take();
   await arrangeBoards(request.targets, request.rowDragged);
+  resizedBoards = {};
   postRows();
 }
 
@@ -927,11 +1047,17 @@ async function addRow(): Promise<void> {
   }
   const last = board.rows[board.rows.length - 1];
   const y = last !== undefined ? last.y + last.height + ROW_GAP : 0;
-  const row = await createRow(board.container, nextRowName(
-      board.rows.map((row) => row.name),
+  const sizing = boardSizing(board, titleBlockOf(board.container));
+  const row = await createRow(
+    board.container,
+    nextRowName(
+      board.rows.map((candidate) => candidate.name),
       board.rows.length + 1,
-    ), FALLBACK_COLOR_KEY, y);
-  row.resizeWithoutConstraints(boardWidth(board.rows), ROW_HEIGHT);
+    ),
+    FALLBACK_COLOR_KEY,
+    y,
+    sizing,
+  );
   markRow(row.id);
   scheduleArrange(ARRANGE_DEBOUNCE_MS);
   figma.viewport.scrollAndZoomIntoView([row]);
@@ -993,7 +1119,7 @@ async function renameRow(id: string, name: string): Promise<void> {
   }
   row.name = trimmed;
   const label = await ensureLabel(row);
-  await writeLabelText(label, trimmed);
+  await writeLabelText(label, trimmed, row.height);
 }
 
 async function setRowColor(id: string, colorKey: string): Promise<void> {
@@ -1201,6 +1327,13 @@ function handleChanges(changes: ReadonlyArray<DocumentChange | NodeChange>): voi
         }
       }
       marked = true;
+    }
+
+    if (live !== null && isBoardContainer(live)) {
+      const boardId = live.getPluginData(TIER_BOARD_KEY);
+      if (boardId !== '') {
+        resizedBoards[boardId] = { width: live.width, height: live.height };
+      }
     }
 
     // For a node inside the board but in no row, and for a sticky that crossed parents
