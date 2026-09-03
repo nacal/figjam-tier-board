@@ -67,6 +67,38 @@ Left out, and why:
   a tag that implies a missing feature sets up the wrong expectation.
 - `figjam` — redundant; the listing is already filtered by editor.
 
+## Security disclosure form
+
+Answers verified against the code, not from memory. **Re-check them whenever
+anything is added that talks to the network or stores data somewhere new.**
+
+| Question | Answer |
+| --- | --- |
+| 1. Backend service? | No, I do not host a backend service |
+| 2. Network requests to services you do not host? | Does not make any network requests |
+| 3. User authentication? | No |
+| 4. Store data read/derived from the plugin API? | Yes, locally (`figma.clientStorage`, `node.setPluginData`) |
+| 5. Updates? | Solo developer |
+
+Notes on the two that are easy to get wrong:
+
+**Q2.** No `fetch`, `XMLHttpRequest`, `WebSocket`, `sendBeacon` or `EventSource`
+in `src` or in either bundle, and `networkAccess.allowedDomains` is `["none"]`.
+The only `http(s)` strings in the build are XML namespace identifiers Preact
+uses for SVG and MathML, plus a comment URL inside a dependency — none of them
+requests are made to.
+
+**Q4 is not "No".** The plugin stores twelve `setPluginData` keys on nodes — row
+and board identity, palette, width and row height, the row that owns a tier
+label, the row a sticky last belonged to, and the board name a person typed —
+plus one `figma.clientStorage` key for the auto-arrange toggle. Row ids come
+from the plugin API and the board name is user input. All of it stays in the
+file and on the machine; none of it leaves. The third option, storing somewhere
+not covered by the above, stays unchecked.
+
+**Q5.** There is no review gate on this repository; commits go straight to
+`main`. "Reviewed by a separate person before publishing" would not be true.
+
 ## After submitting
 
 - [ ] Tag the release in git so the published build is identifiable.
