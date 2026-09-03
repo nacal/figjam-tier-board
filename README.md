@@ -17,7 +17,7 @@ FigJam only — `editorType` is `["figjam"]`, and the plugin cannot create stick
 | Colour | Pick a row colour from a preset list |
 | Reorder | Drag a row up or down on the canvas, or use ↑↓ / ⠿ in the panel |
 | Pack left | Items in a row pack to the top left; where you drop one is its rank |
-| Resize | Drag the right edge of any row to resize the whole board |
+| Resize | Drag the board's corner to scale it, or the right edge of any row for width alone |
 | Board name | Name a board; the name also appears as a heading on the canvas |
 | Palette | Light or dark, seeded from the lightness of the canvas background |
 
@@ -54,6 +54,15 @@ Most of these are things that only became clear after being wrong about them.
 - **Never test for a deleted node with `'removed' in node`.** `BaseNodeMixin` declares `readonly removed: boolean` too, so it is true for live nodes as well; every change is taken for a deletion and no arrange ever runs. Read the value. `'node' in change` is the same trap — switch on `change.type` instead.
 - A sticky drag is debounced by 320ms; a row drag waits 420ms, so a reorder cannot cut in while the row is still held.
 - `origin: 'REMOTE'` is ignored. Reacting to it would have every collaborator fighting over the same rows.
+
+### Resizing
+
+- Dragging the board's corner scales it: width decides how many items fit on a line, height is spread evenly over the rows. `RowMetrics` already parameterised `labelWidth` and `minHeight`, so this is a per-board metrics object rather than a new layout path.
+- The tier label is a square whose side is the row height, so a taller board reads as zoomed rather than stretched. A side effect worth knowing: a taller board fits *fewer* items per line, because the label takes more width.
+- The board's own size wins over the per-row width. Dragging the corner is the more direct gesture, and the row edge still works for whoever grabs that instead.
+- **The floor is what the contents need, not the height of a sticky.** An empty board shrinks to 96px rows; one holding stickies stops at 288px (240 plus padding). Clamping to 288 either way left shrinking indistinguishable from snapping back to the 300px default.
+- The tier letter is sized against its cell. At a fixed 96px it would overflow a shrunken one.
+- **A large shrink has to be read from the change event.** It pushes the lower rows out of the section, and returning those strays resizes the container back to fit them before the arrange looks at it — so the size the user dragged to no longer exists by then. Without capturing it on arrival, small drags work and large ones appear to do nothing. Removing the capture also stops the arrange from converging at all.
 
 ### Palette
 
