@@ -36,53 +36,36 @@ to two weeks.
 
 ### Tags
 
-The docs do not state whether tags are free-form or how many are allowed, so the
-form is the authority. They are listed here in priority order — cut from the
-bottom to fit whatever limit it imposes.
+Five at most, comma or tab separated. Paste:
 
-1. `tier list` — the name of the thing being made, and what someone will type
-2. `ranking`
-3. `tier list maker`
-4. `sticky notes` — what the plugin actually operates on
-5. `prioritization` — how a team would use it rather than what it does
-6. `sorting`
-7. `workshop`
-8. `facilitation`
-9. `team ranking`
+```
+tier list, ranking, prioritization, workshop, sticky notes
+```
 
-Two words left out on purpose:
+With only five slots, each one should buy a different way in rather than another
+phrasing of the same one.
 
-- `tiermaker`, the brand behind tiermaker.com. Trading on it invites confusion
-  and is the sort of thing a review can object to.
-- `voting`. Tier boards do get used to vote, but the plugin counts nothing, and
-  a tag that implies a feature it does not have sets up the wrong expectation.
+| Tag | What it reaches |
+| --- | --- |
+| `tier list` | the name of the thing, and what someone already looking will type |
+| `ranking` | the same intent worded differently, which is common enough to be worth a slot of its own |
+| `prioritization` | people with work to order who would never search for a tier list |
+| `workshop` | facilitators browsing for something to run a session with |
+| `sticky notes` | what the plugin actually operates on, which is what sets it apart |
 
-`figjam` is redundant: the listing is already filtered by editor.
+Left out, and why:
 
-### Description
-
-> Tier Board makes the rows of a tier list and leaves the ranking to you.
->
-> The things you rank are plain FigJam stickies. Write them with FigJam itself,
-> drag them into a row, and they pack to the left in the order you dropped them
-> — the position you drop something in is its rank. Drag a sticky onto another
-> and they trade places.
->
-> **What it does**
->
-> - Creates a board of five rows, S through D. Add, delete, rename and recolour
->   rows, and put as many boards on a page as you like.
-> - Packs each row from the left as you drag, so a row never needs tidying.
->   Turn it off if you would rather place things by hand.
-> - Reorder rows by dragging them up and down on the canvas, or from the panel.
-> - The board is one section: grab it to move the whole table, or drag its
->   corner to scale it.
-> - Name a board and the name appears as a heading on the canvas, so everyone
->   looking at the file can see it.
-> - Picks a light or dark palette from the canvas it is created on, and lets you
->   switch.
->
-> Nothing leaves your file — the plugin makes no network requests.
+- `tier list maker` — nearly the same string as `tier list`. If tags match as
+  whole phrases it only catches that exact wording; if they are tokenised it is
+  redundant. Either way it spends a slot on nothing.
+- `sorting` — too broad. It competes with layout and sorting plugins and would
+  disappoint whoever arrives.
+- `facilitation` — overlaps `workshop`, which is the more common search.
+- `tiermaker` — someone else's brand. Trading on it invites the confusion the
+  name `Tier Board` was chosen to avoid, and a review can object.
+- `voting` — tier boards do get used to vote, but the plugin counts nothing, and
+  a tag that implies a missing feature sets up the wrong expectation.
+- `figjam` — redundant; the listing is already filtered by editor.
 
 ## After submitting
 
