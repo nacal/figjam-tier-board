@@ -5,9 +5,22 @@
 | `icon.png` | 128×128 | Plugin icon on the Community listing |
 | `cover.png` | 1920×1080 | Thumbnail on the Community listing |
 
-Editable sources live in <https://www.figma.com/design/CVnPV1rkiUZyaO1om7cF0D>,
-page `Tier Board assets`. Re-export at scale 1; both frames are already the
-size the listing recommends: 128×128 for the icon, 1920×1080 for the thumbnail.
+These PNGs are the artefacts; there is no Figma file behind them any more. Every
+measurement needed to rebuild them is written down below, and the palette comes
+from `src/domain/theme.ts` and `src/domain/color.ts`.
+
+```
+canvas      #F5F5F5, dots #AEAEAE, 24px pitch, 3px across
+row face    #FFFFFF   border #D5D5D5   letters #1E1E1E, Inter Medium
+tier cells  S #F19A9A  A #F5BC85  B #F8DE94  C #FBFB9C  D #CBF6A0
+stickies    #FFE299 #A8DAFF #B3EFBD #FFA8DB #D3BDFF #B3F4EF
+
+icon    128×128, board inset 6px, 3 rows, tier cell 42px, stickies 25px, pad 7px
+        S holds two stickies, A holds one
+cover   1920×1080, board 1100×560 at x=700, rows 112px, tier cell 112px,
+        stickies 88px, pad 12px, 6/4/3/2/1 down the rows
+        title Inter Bold 104, subtitle Inter Regular 38/52, tag Inter Semi Bold 24
+```
 
 Both show the board with stickies thinning out down the rows, which is what
 reads as a ranking. The icon carries two in S and one in A; the cover runs
