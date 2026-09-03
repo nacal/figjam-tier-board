@@ -14,6 +14,9 @@ rows, a pastel tier cell on the left of each, one sticky in the top row.
 
 - The letters stay. Colour bars alone could be a chart or a palette rather than
   a tier list.
+- The letters are Inter Medium, matching the plugin. A tier label is a FigJam
+  `ShapeWithText` left at its default weight, and the plugin never changes it,
+  so anything heavier here would misrepresent the product.
 - The cells take half the width. Narrower ones left the icon mostly dark, and
   the letters too small to survive being shown at 32px.
 - Checked by downscaling to 48px and 32px, which is the size the listing and the
