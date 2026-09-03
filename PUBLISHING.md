@@ -34,6 +34,31 @@ to two weeks.
 | Publisher | *yourself, or the team/organization* |
 | Playground file | optional — a FigJam file with a pool of stickies ready to rank |
 
+### Tags
+
+The docs do not state whether tags are free-form or how many are allowed, so the
+form is the authority. They are listed here in priority order — cut from the
+bottom to fit whatever limit it imposes.
+
+1. `tier list` — the name of the thing being made, and what someone will type
+2. `ranking`
+3. `tier list maker`
+4. `sticky notes` — what the plugin actually operates on
+5. `prioritization` — how a team would use it rather than what it does
+6. `sorting`
+7. `workshop`
+8. `facilitation`
+9. `team ranking`
+
+Two words left out on purpose:
+
+- `tiermaker`, the brand behind tiermaker.com. Trading on it invites confusion
+  and is the sort of thing a review can object to.
+- `voting`. Tier boards do get used to vote, but the plugin counts nothing, and
+  a tag that implies a feature it does not have sets up the wrong expectation.
+
+`figjam` is redundant: the listing is already filtered by editor.
+
 ### Description
 
 > Tier Board makes the rows of a tier list and leaves the ranking to you.
