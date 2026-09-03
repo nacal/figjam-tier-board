@@ -3,11 +3,11 @@
 | File | Size | Where it goes |
 | --- | --- | --- |
 | `icon.png` | 128×128 | Plugin icon on the Community listing |
-| `cover.png` | 1920×960 | Cover image on the Community listing |
+| `cover.png` | 1920×1080 | Thumbnail on the Community listing |
 
 Editable sources live in <https://www.figma.com/design/CVnPV1rkiUZyaO1om7cF0D>,
 page `Tier Board assets`. Re-export at scale 1; both frames are already the
-exact size the listing asks for.
+size the listing recommends: 128×128 for the icon, 1920×1080 for the thumbnail.
 
 Both show the board with stickies thinning out down the rows, which is what
 reads as a ranking. The icon carries two in S and one in A; the cover runs
