@@ -47,7 +47,7 @@ Most of these are things that only became clear after being wrong about them.
 ### Auto-arrange
 
 - Changes are picked up on **both** `figma.currentPage.on('nodechange')` and `figma.on('documentchange')`. Betting on one channel means auto-arrange dies silently if that channel delivers nothing. Duplicate delivery is harmless: targets dedupe and the debounce coalesces. `documentAccess: "dynamic-page"` is deliberately not set, because it would make `documentchange` wait on `loadAllPagesAsync`.
-- Which channels subscribed is shown in the panel, so silence can be triaged without guessing.
+- If neither channel subscribes, the panel says so. Nothing on the canvas would ever be picked up in that case, and the alternative — a silently dead auto-arrange — took a long time to diagnose once already.
 - **Only rows that changed are rearranged.** Rearranging untouched rows makes ranks look like they reshuffle themselves whenever a different row is touched.
 - Own writes are told apart from a person's edit by **comparing the parent, position and size the last arrange wrote** against the current values. Ignoring a window of time instead drops every sticky moved inside that window.
 - **The stamp includes the parent.** Rows are stacked at identical sizes, so position and size alone give (324,24)-in-A and (324,24)-in-S the same stamp, and a sticky dragged exactly one row straight up would pass as the plugin's own echo.

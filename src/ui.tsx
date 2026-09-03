@@ -244,7 +244,6 @@ function Plugin(): JSX.Element {
       <Divider />
       <VerticalSpace space="small" />
       <Status subscriptions={state.subscriptions} />
-      <VerticalSpace space="small" />
       <Muted>
         Make stickies with FigJam itself, then drag them into the rows. Reorder rows by
         dragging them up and down on the canvas, or with ↑↓ / ⠿ here. Drag the right edge of
@@ -308,15 +307,17 @@ function BoardBar(props: {
   );
 }
 
-function Status(props: { subscriptions: string[] }): JSX.Element {
+// Shown only when a channel failed to subscribe, which is the one case where
+// nothing on the canvas will ever be picked up and the user needs to know why.
+function Status(props: { subscriptions: string[] }): JSX.Element | null {
   const ok = props.subscriptions.filter((name) => name.indexOf('failed') < 0);
+  if (ok.length > 0) {
+    return null;
+  }
   return (
-    <div class={[styles.status, ok.length === 0 ? styles.statusBad : ''].filter(Boolean).join(' ')}>
-      <Muted>
-        {ok.length > 0
-          ? `Subscribed to canvas changes: ${props.subscriptions.join(' / ')}`
-          : `Not subscribed to canvas changes: ${props.subscriptions.join(' / ') || '(none)'}`}
-      </Muted>
+    <div class={`${styles.status} ${styles.statusBad}`}>
+      Auto-arrange is off: this plugin could not subscribe to canvas changes.
+      {props.subscriptions.length > 0 ? ` (${props.subscriptions.join(' / ')})` : null}
     </div>
   );
 }

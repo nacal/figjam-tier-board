@@ -91,8 +91,8 @@
 }
 
 .status {
-  color: var(--figma-color-text-secondary);
-  word-break: break-all;
+  padding-bottom: 8px;
+  word-break: break-word;
 }
 
 .statusBad {
