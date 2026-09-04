@@ -67,6 +67,31 @@ Left out, and why:
   a tag that implies a missing feature sets up the wrong expectation.
 - `figjam` — redundant; the listing is already filtered by editor.
 
+### Description
+
+> Tier Board makes the rows of a tier list and leaves the ranking to you.
+>
+> The things you rank are plain FigJam stickies. Write them with FigJam itself,
+> drag them into a row, and they pack to the left in the order you dropped them
+> — the position you drop something in is its rank. Drag a sticky onto another
+> and they trade places.
+>
+> **What it does**
+>
+> - Creates a board of five rows, S through D. Add, delete, rename and recolour
+>   rows, and put as many boards on a page as you like.
+> - Packs each row from the left as you drag, so a row never needs tidying.
+>   Turn it off if you would rather place things by hand.
+> - Reorder rows by dragging them up and down on the canvas, or from the panel.
+> - The board is one section: grab it to move the whole table, or drag its
+>   corner to scale it.
+> - Name a board and the name appears as a heading on the canvas, so everyone
+>   looking at the file can see it.
+> - Picks a light or dark palette from the canvas it is created on, and lets you
+>   switch.
+>
+> Nothing leaves your file — the plugin makes no network requests.
+
 ## Security disclosure form
 
 Answers verified against the code, not from memory. **Re-check them whenever
