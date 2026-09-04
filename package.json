@@ -28,7 +28,7 @@
     "editorType": [
       "figjam"
     ],
-    "id": "figjam-tier-board",
+    "id": "1677535397231689072",
     "name": "Tier Board",
     "main": "src/main.ts",
     "ui": "src/ui.tsx",

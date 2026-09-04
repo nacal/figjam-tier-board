@@ -14,9 +14,9 @@ to two weeks.
 - [ ] `npm run build` (the minified build, not `build:test`).
 - [ ] **Import the built `manifest.json` and use the plugin on a real FigJam
       board.** Create a board, drop stickies in, reorder rows, resize the board,
-      switch the palette, name a board. The plugin id changed to
-      `figjam-tier-board`, so remove any older copy from Plugins → Development
-      first to avoid running the wrong one.
+      switch the palette, name a board. The id is now the one Figma assigned
+      (`1677535397231689072`), so remove any older copy from Plugins →
+      Development first to avoid running the wrong one.
 - [ ] Check the panel renders and every control works. This is the one thing
       that automated tests cannot cover: they drive the plugin through UI events
       and never render the panel.
