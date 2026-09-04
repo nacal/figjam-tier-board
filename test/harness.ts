@@ -324,6 +324,7 @@ export function createHarness() {
     createShapeWithText,
     createText,
     async loadFontAsync(): Promise<void> {},
+    async loadAllPagesAsync(): Promise<void> {},
     async getNodeByIdAsync(id: string): Promise<FakeNode | null> {
       const walk = (nodes: FakeNode[]): FakeNode | null => {
         for (const node of nodes) {
@@ -603,6 +604,7 @@ export function createHarness() {
   return {
     figma,
     page: page as unknown as FakeParent,
+    listeners: page.listeners,
     send,
     restart,
     change,

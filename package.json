@@ -28,6 +28,7 @@
     "editorType": [
       "figjam"
     ],
+    "documentAccess": "dynamic-page",
     "id": "1677535397231689072",
     "name": "Tier Board",
     "main": "src/main.ts",

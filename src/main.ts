@@ -1368,14 +1368,28 @@ function subscribeToCanvas(): void {
   } catch (error) {
     subscriptions.push(`nodechange failed (${String(error)})`);
   }
-  try {
-    figma.on('documentchange', (event: DocumentChangeEvent) => {
-      handleChanges(event.documentChanges);
-    });
-    subscriptions.push('documentchange');
-  } catch (error) {
-    subscriptions.push(`documentchange failed (${String(error)})`);
-  }
+
+  // Under documentAccess: dynamic-page, documentchange only arrives once every
+  // page is loaded. nodechange is already live by then, so nothing is missed
+  // while waiting — and a FigJam file has one page, so there is little to wait
+  // for.
+  void figma.loadAllPagesAsync().then(
+    () => {
+      try {
+        figma.on('documentchange', (event: DocumentChangeEvent) => {
+          handleChanges(event.documentChanges);
+        });
+        subscriptions.push('documentchange');
+      } catch (error) {
+        subscriptions.push(`documentchange failed (${String(error)})`);
+      }
+      postRows();
+    },
+    (error: unknown) => {
+      subscriptions.push(`documentchange failed (${String(error)})`);
+      postRows();
+    },
+  );
 }
 
 // Following the selection saves reaching for the board selector.

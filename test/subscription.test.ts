@@ -84,3 +84,13 @@ test('a live node is not mistaken for a deleted one', async () => {
 
   assert.equal(sticky.x, CONTENT_X, 'is targeted and arranged');
 });
+
+test('nodechange is live before the page load that documentchange waits on', () => {
+  const h = createHarness();
+
+  // Synchronously after boot: documentchange is still behind loadAllPagesAsync,
+  // so nodechange has to be listening already or edits made in that window are
+  // lost.
+  const listening = h.listeners.some((l) => l.type === 'nodechange');
+  assert.equal(listening, true);
+});
